@@ -133,7 +133,7 @@ This notebook performs comprehensive differential expression analysis using mult
 - **Flexible output formats** for integration with other analysis tools
 
 **Key Features:**
-- Multiple statistical approaches for comprehensive analysis
+- Multiple statistical approaches for analysis
 - Machine learning integration for predictive modeling
 - Flexible experimental design support (paired/unpaired)
 - Extensive visualization of results
@@ -141,4 +141,4 @@ This notebook performs comprehensive differential expression analysis using mult
 
 ---
 
-These analyses provide a comprehensive workflow for differential proteomics analysis, from raw Skyline outputs to publication-ready results. The notebooks are designed to be modular, allowing researchers to adapt individual components to their specific experimental needs.
+These analyses provide a workflow for differential proteomics analysis, from raw Skyline outputs to quantitative results. The notebooks are designed to be modular, allowing researchers to adapt individual components to their specific experimental needs.
