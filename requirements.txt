@@ -1,4 +1,4 @@
-# Python packages required for EISAI CSF-EV-NTRK1 Pilot Analysis
+# Python packages required for CSF-EV Pilot Analysis
 # Generated for notebooks: 1-import-skyline-output.ipynb, 2-normalize-data.ipynb, 3-differential-analysis.ipynb
 
 # Core data science packages
