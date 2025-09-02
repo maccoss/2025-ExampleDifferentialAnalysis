@@ -25,7 +25,7 @@ differential_results = ptk.statistical_analysis.run_comprehensive_statistical_an
     config=config
 )
 
-print(f"\n=== FIXED RESULTS ===")
+print("\n=== FIXED RESULTS ===")
 print(f"Number of proteins: {len(differential_results)}")
 print(f"logFC range: {differential_results['logFC'].min():.4f} to {differential_results['logFC'].max():.4f}")
 print(f"logFC mean: {differential_results['logFC'].mean():.4f}")

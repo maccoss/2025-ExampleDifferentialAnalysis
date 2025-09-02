@@ -6,7 +6,6 @@ This avoids pytest and statsmodels import issues.
 
 import pandas as pd
 import sys
-import os
 
 # Add current directory to path
 sys.path.append('.')
@@ -133,7 +132,7 @@ def test_error_handling():
     })
     
     try:
-        result = create_standard_data_structure(raw_data)
+        create_standard_data_structure(raw_data)
         print("   ❌ ERROR: Should have raised ValueError for missing columns")
         return False
     except ValueError as e:

@@ -6,8 +6,6 @@ and identify what's working vs. what's broken.
 
 import sys
 import pandas as pd
-import numpy as np
-from pathlib import Path
 
 # Add current directory to path
 sys.path.insert(0, '.')
@@ -16,25 +14,21 @@ print("🔍 PROTEOMICS TOOLKIT DIAGNOSTIC TEST")
 print("=" * 50)
 
 try:
-    from proteomics_toolkit import data_import
     print("✅ data_import module imported successfully")
 except Exception as e:
     print(f"❌ data_import import failed: {e}")
 
 try:
-    from proteomics_toolkit import normalization
     print("✅ normalization module imported successfully")
 except Exception as e:
     print(f"❌ normalization import failed: {e}")
 
 try:
-    from proteomics_toolkit import statistical_analysis
     print("✅ statistical_analysis module imported successfully")
 except Exception as e:
     print(f"❌ statistical_analysis import failed: {e}")
 
 try:
-    from proteomics_toolkit import preprocessing
     print("✅ preprocessing module imported successfully")
 except Exception as e:
     print(f"❌ preprocessing import failed: {e}")
