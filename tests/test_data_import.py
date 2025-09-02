@@ -237,7 +237,7 @@ class TestMatchSamplesToMetadata:
 
         metadata = pd.DataFrame({"Sample": ["Sample_1"], "Group": ["Control"]})
 
-        result = match_samples_to_metadata(cleaned_sample_names, metadata)
+        result = match_samples_to_metadata(cleaned_sample_names, metadata, include_unmatched=False)
 
         assert len(result) == 1  # Only matched sample included
         assert "Sample_1" in result

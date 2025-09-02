@@ -115,7 +115,7 @@ def parse_uniprot_identifier(protein_id: str) -> Dict[str, str]:
 
 def parse_gene_from_description(protein_description: str) -> str:
     """
-    Extract gene name from protein description using GN= pattern.
+    Extract gene name from protein description using GN= or Gene= pattern.
 
     Parameters:
     -----------
@@ -131,8 +131,8 @@ def parse_gene_from_description(protein_description: str) -> str:
 
     desc_str = str(protein_description).strip()
 
-    # Extract gene name from GN= pattern
-    gene_match = re.search(r"GN=([^=\s]+)", desc_str)
+    # Extract gene name from GN= or Gene= pattern
+    gene_match = re.search(r"(?:GN|Gene)=([^=\s]+)", desc_str)
     return gene_match.group(1).strip() if gene_match else ""
 
 
@@ -221,6 +221,7 @@ def clean_sample_names(
     sample_columns: List[str],
     common_prefix: Optional[str] = None,
     common_suffix: Optional[str] = None,
+    auto_detect: bool = False,
 ) -> Dict[str, str]:
     """
     Clean sample names by removing common prefixes/suffixes.
@@ -230,9 +231,11 @@ def clean_sample_names(
     sample_columns : List[str]
         List of sample column names
     common_prefix : str, optional
-        Common prefix to remove
+        Common prefix to remove. If None and auto_detect is True, will be auto-detected
     common_suffix : str, optional
-        Common suffix to remove
+        Common suffix to remove. If None and auto_detect is True, will be auto-detected
+    auto_detect : bool, default False
+        Whether to auto-detect common prefixes/suffixes when they are not provided
 
     Returns:
     --------
@@ -241,8 +244,8 @@ def clean_sample_names(
 
     cleaned_names = {}
 
-    # Auto-detect common prefix if not provided
-    if common_prefix is None:
+    # Auto-detect common prefix if not provided and auto_detect is True
+    if common_prefix is None and auto_detect:
         if len(sample_columns) > 1:
             # Find common prefix
             prefix = os.path.commonprefix(sample_columns)
@@ -251,9 +254,11 @@ def clean_sample_names(
             common_prefix = prefix if len(prefix) > 0 else ""
         else:
             common_prefix = ""
+    elif common_prefix is None:
+        common_prefix = ""
 
-    # Auto-detect common suffix if not provided
-    if common_suffix is None:
+    # Auto-detect common suffix if not provided and auto_detect is True
+    if common_suffix is None and auto_detect:
         if len(sample_columns) > 1:
             # Find common suffix by reversing strings
             reversed_names = [name[::-1] for name in sample_columns]
@@ -263,9 +268,12 @@ def clean_sample_names(
             common_suffix = suffix if len(suffix) > 0 else ""
         else:
             common_suffix = ""
+    elif common_suffix is None:
+        common_suffix = ""
 
-    print(f"Removing common prefix: '{common_prefix}'")
-    print(f"Removing common suffix: '{common_suffix}'")
+    if auto_detect:
+        print(f"Auto-detected common prefix: '{common_prefix}'")
+        print(f"Auto-detected common suffix: '{common_suffix}'")
 
     for original_name in sample_columns:
         cleaned_name = original_name
@@ -278,9 +286,10 @@ def clean_sample_names(
         if common_suffix and cleaned_name.endswith(common_suffix):
             cleaned_name = cleaned_name[: -len(common_suffix)]
 
-        # Clean up any remaining non-alphanumeric characters at start/end
-        cleaned_name = re.sub(r"^[^a-zA-Z0-9]+", "", cleaned_name)
-        cleaned_name = re.sub(r"[^a-zA-Z0-9]+$", "", cleaned_name)
+        # Clean up any remaining non-alphanumeric characters at start/end only if we're actually cleaning
+        if common_prefix or common_suffix:
+            cleaned_name = re.sub(r"^[^a-zA-Z0-9]+", "", cleaned_name)
+            cleaned_name = re.sub(r"[^a-zA-Z0-9]+$", "", cleaned_name)
 
         cleaned_names[original_name] = cleaned_name
 
@@ -288,7 +297,9 @@ def clean_sample_names(
 
 
 def match_samples_to_metadata(
-    cleaned_sample_names: Dict[str, str], metadata: pd.DataFrame
+    cleaned_sample_names: Dict[str, str], 
+    metadata: pd.DataFrame,
+    include_unmatched: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Match cleaned sample names to metadata entries.
@@ -299,6 +310,8 @@ def match_samples_to_metadata(
         Mapping from original to cleaned sample names
     metadata : pd.DataFrame
         Sample metadata
+    include_unmatched : bool, default True
+        Whether to include unmatched samples with placeholder metadata
 
     Returns:
     --------
@@ -335,13 +348,14 @@ def match_samples_to_metadata(
         if not metadata_match.empty:
             matched_count += 1
             sample_metadata[original_name] = metadata_match.iloc[0].to_dict()
-        else:
-            # Create placeholder metadata
+        elif include_unmatched:
+            # Create placeholder metadata for unmatched samples
             sample_metadata[original_name] = {
                 str(replicate_col): cleaned_name,
                 "Group": "Unknown",
                 "matched": False,
             }
+        # If include_unmatched is False, skip unmatched samples
 
     print(f"Matched {matched_count}/{len(cleaned_sample_names)} samples to metadata")
 

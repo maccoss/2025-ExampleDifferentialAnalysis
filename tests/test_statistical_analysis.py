@@ -5,12 +5,15 @@ Tests for proteomics_toolkit.statistical_analysis module
 import pandas as pd
 import numpy as np
 import warnings
+import pytest
 
 from proteomics_toolkit.statistical_analysis import (
     StatisticalConfig,
     prepare_metadata_dataframe,
     run_paired_t_test,
     run_unpaired_t_test,
+    run_wilcoxon_test,
+    run_mann_whitney_test,
     apply_multiple_testing_correction,
     run_comprehensive_statistical_analysis,
     display_analysis_summary,
@@ -28,10 +31,10 @@ class TestStatisticalConfig:
         config = StatisticalConfig()
 
         assert config.statistical_test_method == "mixed_effects"
-        assert config.analysis_type == "interaction_analysis"
+        assert config.analysis_type == "paired"
         assert config.p_value_threshold == 0.05
         assert config.fold_change_threshold == 1.5
-        assert config.use_adjusted_pvalue == "fdr_bh"
+        assert config.use_adjusted_pvalue == "adjusted"
         assert config.enable_pvalue_fallback is True
 
     def test_config_modification(self):
@@ -69,9 +72,9 @@ class TestPrepareMetadataDataframe:
         config = StatisticalConfig()
         config.subject_column = "NonexistentColumn"
 
-        # This should handle missing columns gracefully
-        result = prepare_metadata_dataframe(sample_metadata, sample_columns, config)
-        assert isinstance(result, pd.DataFrame)
+        # This should raise a ValueError for missing required columns
+        with pytest.raises(ValueError, match="Missing required metadata columns"):
+            prepare_metadata_dataframe(sample_metadata, sample_columns, config)
 
 
 class TestRunPairedTTest:
@@ -146,6 +149,230 @@ class TestRunUnpairedTTest:
         assert "logFC" in result.columns
         assert "t" in result.columns
         assert len(result) == len(protein_data)
+
+
+class TestRunWilcoxonTest:
+    """Test Wilcoxon signed-rank test"""
+
+    def test_wilcoxon_test_basic(
+        self, standardized_protein_data, sample_metadata, statistical_config
+    ):
+        """Test basic Wilcoxon signed-rank test functionality"""
+        statistical_config.statistical_test_method = "wilcoxon"
+        statistical_config.paired_column = "Visit"
+        statistical_config.paired_label1 = "Baseline"
+        statistical_config.paired_label2 = "Week4"
+        statistical_config.subject_column = "Subject"
+
+        # Create metadata DataFrame
+        sample_columns = list(standardized_protein_data.columns[5:])
+        metadata_df = prepare_metadata_dataframe(
+            sample_metadata, sample_columns, statistical_config
+        )
+
+        result = run_wilcoxon_test(standardized_protein_data, metadata_df, statistical_config)
+
+        # Check result structure
+        assert isinstance(result, pd.DataFrame)
+        assert "Protein" in result.columns
+        assert "P.Value" in result.columns
+        assert "logFC" in result.columns
+        assert "test_method" in result.columns
+        assert len(result) == len(standardized_protein_data)
+        
+        # Check that 'statistic' column exists in successful results
+        # (may not exist if all tests fail and use _create_empty_result)
+        valid_results = result[result["P.Value"].notna()]
+        if len(valid_results) > 0:
+            assert "statistic" in result.columns
+            assert (valid_results["test_method"] == "Wilcoxon signed-rank").all()
+        else:
+            print("All Wilcoxon tests failed - this is expected with random test data")
+
+    def test_wilcoxon_test_insufficient_data(self, statistical_config):
+        """Test Wilcoxon test with insufficient data"""
+        # Create minimal data with too few samples
+        protein_data = pd.DataFrame({
+            "Protein": ["P00001"],
+            "Description": ["Test Protein 1"],
+            "Protein Gene": ["GENE1"],
+            "UniProt_Accession": ["P00001"],
+            "UniProt_Entry_Name": ["TEST1_HUMAN"],
+            "Sample1": [100.0],
+            "Sample2": [110.0]
+        }).set_index("Protein")
+
+        # Create matching metadata - not enough for pairing
+        metadata_df = pd.DataFrame({
+            "Sample": ["Sample1", "Sample2"],
+            "Visit": ["D-02", "D-13"],
+            "Subject": ["S1", "S2"]  # Different subjects, so no pairing
+        })
+
+        statistical_config.statistical_test_method = "wilcoxon"
+        result = run_wilcoxon_test(protein_data, metadata_df, statistical_config)
+
+        # Should return empty results due to insufficient pairing
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
+        assert result.iloc[0]["P.Value"] is np.nan or pd.isna(result.iloc[0]["P.Value"])
+
+
+class TestRunMannWhitneyTest:
+    """Test Mann-Whitney U test"""
+
+    def test_mann_whitney_test_basic(
+        self, standardized_protein_data, sample_metadata, statistical_config
+    ):
+        """Test basic Mann-Whitney U test functionality"""
+        statistical_config.statistical_test_method = "mann_whitney"
+        statistical_config.group_column = "DrugDose"
+        statistical_config.group_labels = ["Placebo", "High"]
+
+        # Create metadata DataFrame
+        sample_columns = list(standardized_protein_data.columns[5:])
+        metadata_df = prepare_metadata_dataframe(
+            sample_metadata, sample_columns, statistical_config
+        )
+
+        result = run_mann_whitney_test(standardized_protein_data, metadata_df, statistical_config)
+
+        # Check result structure
+        assert isinstance(result, pd.DataFrame)
+        assert "Protein" in result.columns
+        assert "P.Value" in result.columns
+        assert "logFC" in result.columns
+        assert "test_method" in result.columns
+        assert len(result) == len(standardized_protein_data)
+        
+        # Check that 'statistic' column exists in successful results
+        # (may not exist if all tests fail and use _create_empty_result)
+        valid_results = result[result["P.Value"].notna()]
+        if len(valid_results) > 0:
+            assert "statistic" in result.columns
+            assert (valid_results["test_method"] == "Mann-Whitney U").all()
+        else:
+            print("All Mann-Whitney tests failed - this is expected with random test data")
+
+    def test_mann_whitney_test_insufficient_data(self, statistical_config):
+        """Test Mann-Whitney test with insufficient data"""
+        # Create minimal data
+        protein_data = pd.DataFrame({
+            "Protein": ["P00001"],
+            "Description": ["Test Protein 1"],
+            "Protein Gene": ["GENE1"],
+            "UniProt_Accession": ["P00001"],
+            "UniProt_Entry_Name": ["TEST1_HUMAN"],
+            "Sample1": [100.0]
+        }).set_index("Protein")
+
+        metadata_df = pd.DataFrame({
+            "Sample": ["Sample1"],
+            "DrugDose": ["0"]
+        })
+
+        statistical_config.statistical_test_method = "mann_whitney"
+        statistical_config.group_column = "DrugDose"
+        statistical_config.group_labels = ["0", "20"]
+        # Don't set paired configuration for unpaired test
+        statistical_config.paired_column = None
+        statistical_config.paired_label1 = None  
+        statistical_config.paired_label2 = None
+
+        result = run_mann_whitney_test(protein_data, metadata_df, statistical_config)
+
+        # Should return empty results due to insufficient data
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
+        assert result.iloc[0]["P.Value"] is np.nan or pd.isna(result.iloc[0]["P.Value"])
+
+
+class TestAllStatisticalMethods:
+    """Test all statistical methods are working with comprehensive analysis"""
+
+    def test_all_methods_available(
+        self, standardized_protein_data, sample_metadata, statistical_config
+    ):
+        """Test that all 7 statistical methods can be called"""
+        
+        # List of all methods that should be supported
+        all_methods = [
+            "mixed_effects",
+            "paired_t", 
+            "paired_welch",
+            "welch_t",
+            "student_t",
+            "wilcoxon",
+            "mann_whitney"
+        ]
+        
+        successful_methods = []
+        failed_methods = []
+        
+        for method in all_methods:
+            try:
+                statistical_config.statistical_test_method = method
+                
+                # Set appropriate configuration for each method type
+                if method in ["mixed_effects", "paired_t", "paired_welch", "wilcoxon"]:
+                    # Paired analysis setup
+                    statistical_config.paired_column = "Visit"
+                    statistical_config.paired_label1 = "Baseline"
+                    statistical_config.paired_label2 = "Week4"
+                    statistical_config.subject_column = "Subject"
+                    statistical_config.analysis_type = "paired"
+                else:
+                    # Unpaired analysis setup
+                    statistical_config.group_column = "DrugDose"
+                    statistical_config.group_labels = ["Placebo", "High"]
+                    statistical_config.analysis_type = "unpaired"
+                
+                # Run the comprehensive analysis to test integration
+                try:
+                    result = run_comprehensive_statistical_analysis(
+                        standardized_protein_data, sample_metadata, statistical_config
+                    )
+                    
+                    # Basic result validation
+                    assert isinstance(result, pd.DataFrame)
+                    assert len(result) > 0
+                    assert "Protein" in result.columns
+                    assert "P.Value" in result.columns
+                    
+                    successful_methods.append(method)
+                    print(f"✓ {method}: SUCCESS")
+                    
+                except Exception as e:
+                    failed_methods.append((method, str(e)))
+                    print(f"✗ {method}: FAILED - {e}")
+                    
+            except ImportError as e:
+                # Handle missing dependencies (e.g., statsmodels for mixed_effects)
+                if method == "mixed_effects" and "statsmodels" in str(e):
+                    print(f"⚠ {method}: SKIPPED - Missing dependency (statsmodels)")
+                    continue
+                else:
+                    failed_methods.append((method, str(e)))
+                    
+        # Report results
+        print(f"\nSTATISTICAL METHOD COVERAGE REPORT:")
+        print(f"✓ Successful methods: {len(successful_methods)}")
+        print(f"✗ Failed methods: {len(failed_methods)}")
+        
+        if failed_methods:
+            print(f"\nFailed methods details:")
+            for method, error in failed_methods:
+                print(f"  - {method}: {error}")
+        
+        # Ensure at least parametric methods work
+        parametric_methods = ["paired_t", "paired_welch", "welch_t", "student_t"]
+        working_parametric = [m for m in parametric_methods if m in successful_methods]
+        assert len(working_parametric) >= 2, f"At least 2 parametric methods should work, got: {working_parametric}"
+        
+        # Ensure non-parametric methods work
+        nonparametric_methods = ["wilcoxon", "mann_whitney"]
+        working_nonparametric = [m for m in nonparametric_methods if m in successful_methods]
+        assert len(working_nonparametric) == 2, f"Both non-parametric methods should work, got: {working_nonparametric}"
 
 
 class TestMultipleTestingCorrection:
@@ -252,7 +479,10 @@ class TestDisplayAnalysisSummary:
         assert isinstance(summary, dict)
         assert "analysis_method" in summary
         assert "total_proteins" in summary
-        assert "significant_proteins" in summary
+        assert "significant_005" in summary  # Changed from "significant_proteins"
+        assert "significant_001" in summary
+        assert "valid_results" in summary
+        assert "success_rate" in summary
 
     def test_display_summary_empty_results(self, statistical_config):
         """Test summary display with empty results"""

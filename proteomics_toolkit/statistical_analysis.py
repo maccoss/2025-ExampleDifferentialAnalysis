@@ -7,7 +7,7 @@ protein expression analysis with support for various statistical methods.
 
 import pandas as pd
 import numpy as np
-from scipy.stats import ttest_1samp, ttest_ind
+from scipy.stats import ttest_1samp, ttest_ind, mannwhitneyu, wilcoxon
 from statsmodels.stats.multitest import multipletests
 import warnings
 from .normalization import is_normalization_log_transformed
@@ -199,9 +199,17 @@ def prepare_metadata_dataframe(sample_metadata_dict, sample_columns, config):
             print(f"Warning: No metadata found for sample {sample_name}")
 
     if not metadata_rows:
-        raise ValueError("No metadata found for any samples")
+        print("Warning: No metadata found for any samples - returning empty DataFrame")
+        # Return empty DataFrame with expected columns for graceful handling
+        expected_cols = ["Sample", config.subject_column, config.paired_column, config.group_column]
+        return pd.DataFrame(columns=expected_cols)
 
     metadata_df = pd.DataFrame(metadata_rows)
+
+    # Skip validation if no data (graceful handling for edge cases)
+    if len(metadata_df) == 0:
+        print("Empty metadata - skipping validation")
+        return metadata_df
 
     # Validate required columns exist
     required_cols = [config.subject_column, config.paired_column, config.group_column]
@@ -580,6 +588,192 @@ def run_unpaired_t_test(protein_data, metadata_df, config):
     return pd.DataFrame(results)
 
 
+def run_wilcoxon_test(protein_data, metadata_df, config):
+    """Run paired non-parametric Wilcoxon signed-rank test"""
+
+    print("Running Wilcoxon signed-rank test analysis...")
+
+    results = []
+    n_proteins = len(protein_data)
+
+    for i, (protein_idx, protein_values) in enumerate(protein_data.iterrows()):
+        if (i + 1) % 200 == 0:
+            print(f"  Processed {i + 1}/{n_proteins} proteins...")
+
+        # Get data for this protein
+        protein_df = pd.DataFrame(
+            {"Sample": protein_values.index, "Intensity": protein_values.values}
+        )
+
+        # Merge with metadata
+        protein_df = protein_df.merge(metadata_df, on="Sample", how="inner")
+
+        # Remove missing values
+        protein_df = protein_df.dropna(subset=["Intensity"])
+
+        if len(protein_df) < 4:  # Need at least some data
+            results.append(_create_empty_result(protein_idx, "Insufficient data"))
+            continue
+
+        # Calculate paired differences for each subject
+        baseline_data = protein_df[
+            protein_df[config.paired_column] == config.paired_label1
+        ]
+        followup_data = protein_df[
+            protein_df[config.paired_column] == config.paired_label2
+        ]
+
+        # Merge on subject to get paired data
+        paired_data = baseline_data.merge(
+            followup_data, on=config.subject_column, suffixes=("_baseline", "_followup")
+        )
+
+        if len(paired_data) < 3:  # Need at least 3 pairs
+            results.append(
+                _create_empty_result(protein_idx, "Insufficient paired data")
+            )
+            continue
+
+        # Calculate differences (followup - baseline)
+        differences = (
+            paired_data["Intensity_followup"] - paired_data["Intensity_baseline"]
+        )
+
+        # Remove zero differences for Wilcoxon test
+        non_zero_diffs = differences[differences != 0]
+        
+        if len(non_zero_diffs) < 3:
+            results.append(
+                _create_empty_result(protein_idx, "Insufficient non-zero differences")
+            )
+            continue
+
+        try:
+            # Wilcoxon signed-rank test
+            statistic, p_value = wilcoxon(non_zero_diffs, alternative='two-sided')
+
+            # Calculate effect size (r = z / sqrt(N))
+            # For Wilcoxon, we use median and IQR
+            mean_diff = differences.mean()
+            median_diff = differences.median()
+
+            # Pseudo-Cohen's d using median and MAD (more robust)
+            mad = np.median(np.abs(differences - median_diff)) * 1.4826  # Scale factor for normality
+            effect_size = median_diff / mad if mad > 0 else 0
+
+            result = {
+                "Protein": protein_idx,
+                "logFC": median_diff,  # Use median for non-parametric
+                "AveExpr": protein_df["Intensity"].mean(),
+                "statistic": statistic,
+                "P.Value": p_value,
+                "B": np.nan,  # Not applicable for non-parametric tests
+                "n_pairs": len(paired_data),
+                "mean_diff": mean_diff,
+                "median_diff": median_diff,
+                "Effect_Size": effect_size,
+                "test_method": "Wilcoxon signed-rank",
+            }
+
+            results.append(result)
+
+        except Exception as e:
+            results.append(_create_empty_result(protein_idx, f"Analysis failed: {e}"))
+
+    print(f"✓ Wilcoxon signed-rank test completed for {len(results)} proteins")
+    return pd.DataFrame(results)
+
+
+def run_mann_whitney_test(protein_data, metadata_df, config):
+    """Run unpaired non-parametric Mann-Whitney U test"""
+
+    print("Running Mann-Whitney U test analysis...")
+
+    results = []
+    n_proteins = len(protein_data)
+
+    # Filter to specific timepoint if needed (only if paired_column is present in metadata)
+    if (config.paired_column and 
+        config.paired_label2 and 
+        hasattr(config, 'paired_column') and 
+        config.paired_column in metadata_df.columns):
+        metadata_df = metadata_df[
+            metadata_df[config.paired_column] == config.paired_label2
+        ]
+        print(f"  Analyzing {config.paired_label2} timepoint only")
+
+    for i, (protein_idx, protein_values) in enumerate(protein_data.iterrows()):
+        if (i + 1) % 200 == 0:
+            print(f"  Processed {i + 1}/{n_proteins} proteins...")
+
+        # Get data for this protein
+        protein_df = pd.DataFrame(
+            {"Sample": protein_values.index, "Intensity": protein_values.values}
+        )
+
+        # Merge with metadata
+        protein_df = protein_df.merge(metadata_df, on="Sample", how="inner")
+        protein_df = protein_df.dropna(subset=["Intensity"])
+
+        if len(protein_df) < 4:
+            results.append(_create_empty_result(protein_idx, "Insufficient data"))
+            continue
+
+        # Split into groups
+        group1_data = protein_df[
+            protein_df[config.group_column] == config.group_labels[0]
+        ]["Intensity"]
+        group2_data = protein_df[
+            protein_df[config.group_column] == config.group_labels[1]
+        ]["Intensity"]
+
+        if len(group1_data) < 2 or len(group2_data) < 2:
+            results.append(_create_empty_result(protein_idx, "Insufficient group data"))
+            continue
+
+        try:
+            # Mann-Whitney U test
+            statistic, p_value = mannwhitneyu(
+                group2_data, group1_data, alternative='two-sided'
+            )
+
+            # Calculate effect size (r = z / sqrt(N))
+            # For Mann-Whitney, we use median and IQR-based effect size
+            median1 = group1_data.median()
+            median2 = group2_data.median()
+            
+            # Pooled MAD for effect size
+            mad1 = np.median(np.abs(group1_data - median1)) * 1.4826
+            mad2 = np.median(np.abs(group2_data - median2)) * 1.4826
+            pooled_mad = np.sqrt((mad1**2 + mad2**2) / 2)
+            
+            effect_size = (median2 - median1) / pooled_mad if pooled_mad > 0 else 0
+
+            # Log fold change using medians
+            log_fc = median2 - median1
+
+            result = {
+                "Protein": protein_idx,
+                "logFC": log_fc,
+                "AveExpr": protein_df["Intensity"].mean(),
+                "statistic": statistic,
+                "P.Value": p_value,
+                "B": np.nan,
+                "n_group1": len(group1_data),
+                "n_group2": len(group2_data),
+                "Effect_Size": effect_size,
+                "test_method": "Mann-Whitney U",
+            }
+
+            results.append(result)
+
+        except Exception as e:
+            results.append(_create_empty_result(protein_idx, f"Analysis failed: {e}"))
+
+    print(f"✓ Mann-Whitney U test completed for {len(results)} proteins")
+    return pd.DataFrame(results)
+
+
 def _create_empty_result(protein_idx, reason):
     """Create empty result for failed analysis"""
     return {
@@ -629,14 +823,30 @@ def apply_multiple_testing_correction(results_df, config):
         results_df["Significant"] = False
         return results_df
 
-    # Apply correction
-    all_pvalues = results_df["P.Value"].fillna(1.0)
-    rejected, adj_pvalues, _, _ = multipletests(
-        all_pvalues, method=config.correction_method
-    )
+    # Check if correction should be applied
+    correction_method = getattr(config, 'correction_method', config.use_adjusted_pvalue)
+    if correction_method == "none" or config.use_adjusted_pvalue == "none":
+        # No correction - adjusted p-values are same as raw p-values
+        results_df["adj.P.Val"] = results_df["P.Value"]
+        results_df["Significant"] = results_df["P.Value"] < config.p_value_threshold
+        print("Multiple testing correction applied:")
+        print("  Method: none (no correction)")
+        print(f"  Significant proteins (p < {config.p_value_threshold}): {(results_df['P.Value'] < config.p_value_threshold).sum()}")
+    else:
+        # Apply correction
+        all_pvalues = results_df["P.Value"].fillna(1.0)
+        rejected, adj_pvalues, _, _ = multipletests(
+            all_pvalues, method=correction_method
+        )
 
-    results_df["adj.P.Val"] = adj_pvalues
-    results_df["Significant"] = rejected
+        results_df["adj.P.Val"] = adj_pvalues
+        results_df["Significant"] = rejected
+
+        print("Multiple testing correction applied:")
+        print(f"  Method: {correction_method}")
+        print(
+            f"  Significant proteins (FDR < 0.05): {(results_df['adj.P.Val'] < 0.05).sum()}"
+        )
 
     # Add significance categories
     results_df["Significance"] = "Not significant"
@@ -645,12 +855,6 @@ def apply_multiple_testing_correction(results_df, config):
     )
     results_df.loc[results_df["adj.P.Val"] < 0.01, "Significance"] = (
         "Highly significant (FDR < 0.01)"
-    )
-
-    print("Multiple testing correction applied:")
-    print(f"  Method: {config.correction_method}")
-    print(
-        f"  Significant proteins (FDR < 0.05): {(results_df['adj.P.Val'] < 0.05).sum()}"
     )
 
     return results_df
@@ -852,9 +1056,14 @@ def run_comprehensive_statistical_analysis(
         results_df = run_paired_t_test(filtered_protein_data, metadata_df, config)
     elif config.statistical_test_method in ["welch_t", "student_t"]:
         results_df = run_unpaired_t_test(filtered_protein_data, metadata_df, config)
+    elif config.statistical_test_method == "wilcoxon":
+        results_df = run_wilcoxon_test(filtered_protein_data, metadata_df, config)
+    elif config.statistical_test_method == "mann_whitney":
+        results_df = run_mann_whitney_test(filtered_protein_data, metadata_df, config)
     else:
         raise ValueError(
-            f"Unknown statistical method: {config.statistical_test_method}"
+            f"Unknown statistical method: {config.statistical_test_method}. "
+            f"Supported methods: mixed_effects, paired_t, paired_welch, welch_t, student_t, wilcoxon, mann_whitney"
         )
 
     # Apply multiple testing correction
