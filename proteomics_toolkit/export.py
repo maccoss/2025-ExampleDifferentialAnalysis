@@ -78,6 +78,7 @@ def export_analysis_results(
 
     # Export sample metadata
     metadata_export = pd.DataFrame.from_dict(sample_metadata, orient="index")
+    metadata_export.index.name = "Sample_ID"  # Add header for the sample names column
     metadata_file = f"{output_prefix}_sample_metadata.csv"
     metadata_export.to_csv(metadata_file)
     exported_files["sample_metadata"] = metadata_file
