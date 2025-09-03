@@ -4,7 +4,7 @@ This repository provides a comprehensive **proteomics analysis toolkit** with ex
 
 ## Getting Started - Minimal Analysis Notebook
 
-**NEW: `EISAI-Minimal-Analysis.ipynb`** - A streamlined, production-ready notebook that demonstrates the complete analysis workflow in a single, well-documented file.
+**`Minimal-Analysis.ipynb`** - A streamlined, production-ready notebook that demonstrates the complete analysis workflow in a single, well-documented file.
 
 ### Key Features:
 - **Complete workflow** in one notebook with minimal code
