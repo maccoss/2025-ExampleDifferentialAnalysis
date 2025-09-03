@@ -1,144 +1,206 @@
-# Example Python Notebook for Analyzing Data from Skyline
+# Proteomics Analysis Toolkit and Example Workflows
 
-I use two Skyline reports for the generation of the input data:
-- I use the standard Replicates report in the document grid to export meta data annotations from within the Skyline document
-- I use the included `MJM Protein Total Areas.skyr` to generate the Protein Quant matrix from the document grid
+This repository provides a comprehensive **proteomics analysis toolkit** with example workflows for analyzing quantitative proteomics data from Skyline. The toolkit supports end-to-end analysis from data import through statistical analysis and visualization.
 
-I've divided my analysis into three notebooks to make it easier to find things.
+## Getting Started - Minimal Analysis Notebook
+
+**NEW: `EISAI-Minimal-Analysis.ipynb`** - A streamlined, production-ready notebook that demonstrates the complete analysis workflow in a single, well-documented file.
+
+### Key Features:
+- **Complete workflow** in one notebook with minimal code
+- **Comprehensive configuration** - all analysis parameters in one place
+- **All visualization capabilities** - quality control, normalization comparison, PCA, correlation analysis
+- **Statistical analysis** - mixed-effects models, t-tests, and non-parametric tests
+- **Flexible design** - works with dose-response, time-course, or treatment comparison studies
+- **Export capabilities** - saves results, configuration, and processed data
+
+### Quick Start:
+1. Configure your analysis parameters in the first cell
+2. Run all cells to perform complete analysis
+3. Review plots and tables for quality control and results
+4. Export results for downstream analysis or reporting
+
+---
+
+## Data Input Requirements
+
+The toolkit uses two standard Skyline reports:
+- **Replicates report** - Export metadata annotations from the document grid
+- **Protein quantitation report** - Use the included `MJM Protein Total Areas.skyr` template
+- **Sample metadata CSV** - Contains experimental design information
+
+---
+
+## Proteomics Toolkit Capabilities
+
+The `proteomics_toolkit` package provides modular functions for comprehensive proteomics analysis:
+
+### **Data Import & Processing**
+- **Skyline output parsing** - Handles protein quantitation matrices and metadata
+- **Protein identifier extraction** - Robust UniProt accession parsing with regex
+- **Sample name normalization** - Automatic cleanup of sample naming conventions
+- **Data structure standardization** - Creates consistent data formats for analysis
+
+### **Quality Assessment**
+- **Missing data visualization** - Comprehensive plots of protein detection patterns
+- **Sample completeness metrics** - Group-wise statistics and quality reporting
+- **Control sample analysis** - Automated QC pool correlation analysis
+- **Data integrity validation** - Ensures proper experimental design structure
+
+### **Normalization Methods**
+- **Median normalization** - Simple, robust correction for loading differences
+- **VSN (Variance Stabilizing Normalization)** - Reduces heteroscedasticity
+- **Quantile normalization** - Makes sample distributions identical
+- **MAD normalization** - Median Absolute Deviation (robust to outliers)
+- **Z-score normalization** - Standardizes to mean=0, std=1
+- **RLR (Robust Linear Regression)** - Corrects for systematic batch effects
+- **LOESS normalization** - Handles intensity-dependent bias
+- **Negative value handling** - Comprehensive strategies for VSN output
+
+### **Statistical Analysis**
+- **Mixed-effects models** - Handles complex experimental designs with random effects
+- **T-tests** - Paired and unpaired comparisons with multiple correction
+- **Non-parametric tests** - Mann-Whitney U and Wilcoxon signed-rank tests
+- **Covariate adjustment** - Incorporates additional metadata variables
+- **Multiple testing correction** - Benjamini-Hochberg FDR and other methods
+- **Effect size calculation** - Fold changes and confidence intervals
+
+### **Visualization Suite**
+- **Box plots** - Sample distribution analysis with group coloring
+- **PCA analysis** - Principal component plots with normalization comparison
+- **Correlation heatmaps** - Triangular matrices with hierarchical clustering
+- **Volcano plots** - Statistical significance vs. fold change visualization
+- **Control sample QC** - Specialized plots for quality assessment
+- **Normalization comparison** - Before/after distribution analysis
+
+### **Export & Reporting**
+- **Results export** - Statistical tables with comprehensive annotations
+- **Configuration saving** - Complete analysis parameter documentation
+- **Publication-ready tables** - Formatted output for manuscripts
+- **Processed data export** - Normalized data matrices for downstream analysis
+
+---
+
+## Example Notebooks
+
+### **Minimal Analysis (RECOMMENDED)**
+- **`EISAI-Minimal-Analysis.ipynb`** - Complete streamlined workflow
+
+### **Detailed Step-by-Step Notebooks**
 
 ## 1-import-skyline-output.ipynb
-**Data Import and Processing Pipeline**
+
+**Legacy Detailed Notebook: Data Import and Processing Pipeline**
 
 This notebook handles the initial data import and processing from Skyline outputs:
 
 - **Data Loading**: Imports protein quantitation matrix and sample metadata from CSV files
-- **Protein Parsing**: Extracts UniProt accession numbers from complex protein identifiers using regex patterns
-- **Sample Name Cleaning**: Removes common prefixes/suffixes and normalizes sample naming conventions
-- **Metadata Integration**: Links quantitation data with experimental metadata (groups, conditions, etc.)
-- **Data Quality Assessment**: 
-  - Visualizes missing data patterns across samples and proteins
-  - Creates summary statistics for protein detection frequency
-  - Generates group-wise sample counts and completeness metrics
-- **Data Structure Creation**: Prepares cleaned datasets for downstream normalization and analysis
-- **Visualization**: Creates comprehensive plots showing data completeness, sample groupings, and protein detection patterns
-
-**Key Features:**
-- Robust protein identifier parsing for various database formats
-- Flexible sample naming cleanup with configurable patterns
-- Comprehensive data quality reporting
-- Exports cleaned data structures for subsequent notebooks
+- **Protein Parsing**: Extracts UniProt accession numbers from complex protein identifiers
+- **Sample Name Cleaning**: Removes common prefixes/suffixes and normalizes sample naming
+- **Data Quality Assessment**: Visualizes missing data patterns and detection frequency
+- **Data Structure Creation**: Prepares cleaned datasets for downstream analysis
 
 ## 2-normalize-data.ipynb
-**Data Normalization and Quality Control**
+
+**Legacy Detailed Notebook: Data Normalization and Quality Control**
 
 This notebook performs comprehensive data normalization and quality assessment:
 
-### **Data Loading and Preprocessing**
-- Imports processed data from the first notebook with output suppression for clean execution
-- Creates log2-transformed data for visualization and analysis
-
-### **Quality Assessment Visualizations**
-- **Box plots** of raw protein abundances by individual replicate
-- **Group-wise comparison** plots with color-coded experimental groups
-- **Distribution analysis** of protein intensities across samples
-
-### **Normalization Methods**
-1. **Median Normalization**
-   - Divides each sample by its median, then multiplies by global median
-   - Maintains original data scale while correcting for loading differences
-   - Simple and robust method for systematic bias correction
-
-2. **Variance Stabilizing Normalization (VSN)**
-   - Implements true VSN using arcsinh (inverse hyperbolic sine) transformation
-   - **Method**: `transformed = arcsinh(a * intensity + b)` where parameters are optimized for variance stabilization
-   - **Purpose**: Reduces the dependency of variance on mean intensity (heteroscedasticity)
-   - **Implementation**: Uses either optimized parameters (via scipy.optimize) or quantile-based parameter estimation
-   - **Effect**: Stabilizes variance across the entire intensity range, improving downstream statistical analysis
-
-### **Comparative Analysis**
-- **Principal Component Analysis (PCA)** on original, median-normalized, and VSN-transformed data
-- **Correlation analysis** of control samples to assess normalization effectiveness
-- **Hierarchical clustering** of control groups to validate biological vs. technical variation
-- **Variance stabilization assessment** comparing coefficient of variation across intensity ranges
-
-### **Control Sample Analysis**
-- **Pattern-based control identification** (configurable patterns for different control types)
-- **Correlation heatmaps** with hierarchical clustering for quality assessment
-- **Within-group vs. between-group correlation analysis** to evaluate normalization success
-- **Group separation metrics** to quantify biological signal preservation
-
-### **VSN Implementation References**
-The VSN normalization implementation is based on the following methodology:
-- **Huber, W. et al. (2002)** "Variance stabilization applied to microarray data calibration and to the quantification of differential expression." *Bioinformatics* 18(suppl_1): S96-S104.
-- **Durbin, B.P. et al. (2002)** "A variance-stabilizing transformation for gene-expression microarray data." *Bioinformatics* 18(suppl_1): S105-S110.
-
-The arcsinh transformation used here provides similar variance stabilization properties to the original VSN method, with the advantage of being parameter-free and computationally efficient for proteomics data.
-
-**Key Features:**
-- Two complementary normalization approaches for different analysis needs
-- Comprehensive quality control visualizations
-- Automated control sample analysis with configurable patterns
-- Statistical assessment of normalization effectiveness
-- Exports normalized datasets for differential analysis
+- **Normalization Methods**: Median normalization and Variance Stabilizing Normalization (VSN)
+- **Quality Control**: Box plots, PCA analysis, and correlation analysis
+- **Control Sample Analysis**: Automated QC pool correlation and clustering analysis
+- **Comparative Analysis**: Before/after normalization comparisons
 
 ## 3-differential-analysis.ipynb
-**Statistical Analysis and Differential Expression**
 
-This notebook performs comprehensive differential expression analysis using multiple statistical approaches:
+**Legacy Detailed Notebook: Statistical Analysis and Differential Expression**
 
-### **Data Integration and Setup**
-- Imports normalized data from previous notebooks with complete output suppression
-- Provides flexible group selection for pairwise comparisons
-- Handles both paired and unpaired experimental designs
+This notebook performs comprehensive differential expression analysis:
 
-### **Statistical Methods**
-1. **T-test Analysis**
-   - Student's t-test for unpaired comparisons
-   - Paired t-test for matched samples
-   - Multiple testing correction using Benjamini-Hochberg FDR
-
-2. **Mann-Whitney U Test**
-   - Non-parametric alternative for non-normal distributions
-   - Robust to outliers and distributional assumptions
-   - Particularly useful for proteomics data with potential skewness
-
-3. **Mixed Effects Models**
-   - Accounts for subject-level variation in paired designs
-   - Handles complex experimental structures with random effects
-   - Uses statsmodels implementation for robust statistical inference
-
-4. **General Linear Models (GLM)**
-   - Flexible framework for incorporating covariates
-   - Supports additional metadata fields as confounding variables
-   - Enables complex experimental design analysis
-
-### **Machine Learning Classification**
-- **Support Vector Machine (SVM)** with cross-validation for binary classification
-- **Feature selection** using:
-  - Mann-Whitney statistical ranking
-  - Cross-validation performance metrics
-  - Replication consistency across CV folds
-- **Model evaluation** with performance metrics and feature importance
-
-### **Visualization and Results**
-- **Volcano plots** showing fold-change vs. statistical significance
-- **Statistical results tables** with multiple comparison corrections
-- **Feature ranking** and selection results
-- **Export capabilities** for downstream pathway analysis
-
-### **Advanced Features**
-- **Covariate adjustment** using additional metadata fields
-- **Robust statistical inference** with appropriate multiple testing corrections
-- **Model diagnostics** and assumption testing
-- **Flexible output formats** for integration with other analysis tools
-
-**Key Features:**
-- Multiple statistical approaches for analysis
-- Machine learning integration for predictive modeling
-- Flexible experimental design support (paired/unpaired)
-- Extensive visualization of results
-- Publication-ready statistical reporting
+- **Statistical Methods**: T-tests, Mann-Whitney U, mixed-effects models, and GLM
+- **Machine Learning**: SVM classification with feature selection
+- **Visualization**: Volcano plots and statistical results tables
+- **Advanced Features**: Covariate adjustment and robust statistical inference
 
 ---
 
-These analyses provide a workflow for differential proteomics analysis, from raw Skyline outputs to quantitative results. The notebooks are designed to be modular, allowing researchers to adapt individual components to their specific experimental needs.
+## Installation and Setup
+
+```python
+# Clone the repository
+git clone https://github.com/maccoss/2025-ExampleDifferentialAnalysis.git
+cd 2025-ExampleDifferentialAnalysis
+
+# Install required packages
+pip install -r requirements.txt
+
+# Start with the minimal analysis notebook
+jupyter notebook EISAI-Minimal-Analysis.ipynb
+```
+
+## Analysis Workflow
+
+### 1. Configure Analysis Parameters
+Set all analysis parameters in the comprehensive configuration cell:
+- Input file paths and data filtering options
+- Normalization method selection (8 options available)
+- Statistical test method and experimental design
+- Significance thresholds and visualization settings
+
+### 2. Data Processing Pipeline
+- **Import**: Load Skyline outputs and metadata
+- **Clean**: Normalize sample names and parse protein identifiers  
+- **Filter**: Remove low-quality proteins based on detection rate
+- **Visualize**: Quality control plots for raw data assessment
+
+### 3. Normalization and Quality Control
+- **Normalize**: Apply selected normalization method
+- **Compare**: Before/after distribution analysis
+- **Assess**: PCA, correlation, and control sample analysis
+- **Validate**: Statistical metrics for normalization effectiveness
+
+### 4. Statistical Analysis
+- **Configure**: Set up statistical model parameters
+- **Analyze**: Run comprehensive differential analysis
+- **Visualize**: Create volcano plots and results tables
+- **Export**: Save results and processed data
+
+## Key Advantages
+
+- **Streamlined Workflow**: Complete analysis in one notebook
+- **Comprehensive Configuration**: All parameters documented and configurable
+- **Production Ready**: Robust error handling and quality control
+- **Flexible Design**: Works with various experimental designs
+- **Reproducible**: Complete configuration export for method documentation
+- **Publication Ready**: High-quality plots and formatted results tables
+
+---
+
+## Repository Structure
+
+```
+├── EISAI-Minimal-Analysis.ipynb          # RECOMMENDED: Complete streamlined workflow
+├── proteomics_toolkit/                   # Core analysis functions
+│   ├── data_import.py                   # Data loading and preprocessing
+│   ├── normalization.py                # All normalization methods
+│   ├── statistical_analysis.py         # Statistical tests and modeling
+│   ├── visualization.py                # Plotting functions
+│   ├── preprocessing.py                # Data filtering and parsing
+│   └── export.py                       # Results export and configuration
+├── example_data/                        # Sample datasets for testing
+├── old_notebooks/                       # Legacy detailed step-by-step notebooks
+├── tests/                               # Comprehensive test suite
+└── requirements.txt                     # Python dependencies
+```
+
+## Example Data
+
+The repository includes example CSF proteomics data from an EISAI pilot study demonstrating:
+- **Dose-response analysis**: 4 dose levels (0, 20, 40, 80 mg)
+- **Longitudinal design**: Paired samples at baseline (D-02) and follow-up (D-13)
+- **Quality control samples**: Multiple control pools for normalization assessment
+- **Mixed-effects modeling**: Complex experimental design with subject-level random effects
+
+---
+
+*This toolkit provides a comprehensive, production-ready solution for quantitative proteomics analysis from Skyline outputs. The minimal notebook approach ensures reproducible, well-documented analyses suitable for publication and regulatory submissions.*

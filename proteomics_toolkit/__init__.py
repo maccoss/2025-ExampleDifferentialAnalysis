@@ -19,6 +19,7 @@ from . import normalization
 from . import statistical_analysis
 from . import visualization
 from . import export
+from . import validation
 
 __version__ = "1.0.0"
 __author__ = "Michael MacCoss, University of Washington"
@@ -47,6 +48,13 @@ from .statistical_analysis import (
     StatisticalConfig,
     run_statistical_analysis,
 )
+from .validation import (
+    validate_metadata_data_consistency,
+    enhanced_sample_processing,
+    generate_sample_matching_diagnostic_report,
+    SampleMatchingError,
+    ControlSampleError,
+)
 from .export import (
     export_analysis_results,
     export_timestamped_config,
@@ -73,6 +81,7 @@ __all__ = [
     "statistical_analysis",
     "visualization",
     "export",
+    "validation",
     "load_skyline_data",
     "parse_protein_identifiers",
     "classify_samples",
@@ -97,6 +106,11 @@ __all__ = [
     "export_complete_analysis",
     "create_config_dict_from_notebook_vars",
     "export_significant_proteins_summary",
+    "validate_metadata_data_consistency",
+    "enhanced_sample_processing",
+    "generate_sample_matching_diagnostic_report",
+    "SampleMatchingError",
+    "ControlSampleError",
     "plot_box_plot",
     "plot_volcano",
     "plot_normalization_comparison",

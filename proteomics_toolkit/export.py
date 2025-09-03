@@ -376,10 +376,9 @@ def export_timestamped_config(
             "# =============================================================================\n\n"
         )
 
-        # Write configuration sections
+        # Define configuration sections with their possible parameters
         section_configs = [
             (
-                1,
                 "INPUT FILES AND PATHS",
                 [
                     "toolkit_path",
@@ -389,10 +388,9 @@ def export_timestamped_config(
                     "remove_common_prefix",
                 ],
             ),
-            (2, "DATA FILTERING PARAMETERS", ["min_detection_rate"]),
-            (3, "NORMALIZATION STRATEGY", ["normalization_method", "optimize_vsn"]),
+            ("DATA FILTERING PARAMETERS", ["min_detection_rate", "min_samples_per_group"]),
+            ("NORMALIZATION STRATEGY", ["normalization_method", "optimize_vsn"]),
             (
-                4,
                 "NEGATIVE VALUE HANDLING STRATEGY",
                 [
                     "handle_negatives",
@@ -401,12 +399,18 @@ def export_timestamped_config(
                 ],
             ),
             (
-                5,
+                "LOG TRANSFORMATION SETTINGS",
+                [
+                    "log_transform_before_stats",
+                    "log_base",
+                    "log_pseudocount",
+                ],
+            ),
+            (
                 "STATISTICAL ANALYSIS STRATEGY",
                 ["statistical_test_method", "analysis_type"],
             ),
             (
-                6,
                 "EXPERIMENTAL DESIGN CONFIGURATION",
                 [
                     "subject_column",
@@ -415,16 +419,15 @@ def export_timestamped_config(
                     "paired_label2",
                     "group_column",
                     "group_labels",
+                    "FORCE_CATEGORICAL",
                 ],
             ),
             (
-                7,
                 "MIXED-EFFECTS MODEL CONFIGURATION",
                 ["interaction_terms", "additional_interactions", "covariates"],
             ),
-            (8, "CONTROL SAMPLE CONFIGURATION", ["control_column", "control_labels"]),
+            ("CONTROL SAMPLE CONFIGURATION", ["control_column", "control_labels"]),
             (
-                9,
                 "VISUALIZATION SETTINGS",
                 [
                     "use_systematic_colors",
@@ -434,7 +437,6 @@ def export_timestamped_config(
                 ],
             ),
             (
-                10,
                 "SIGNIFICANCE THRESHOLDS",
                 [
                     "p_value_threshold",
@@ -445,22 +447,27 @@ def export_timestamped_config(
                 ],
             ),
             (
-                11,
                 "OUTPUT AND EXPORT SETTINGS",
                 [
                     "export_results",
                     "output_prefix",
                     "label_top_proteins",
                     "random_seed",
-                    "min_samples_per_group",
                 ],
             ),
         ]
 
-        for section_num, section_name, param_names in section_configs:
-            _write_config_section(
-                f, section_name, config_dict, param_names, section_num
-            )
+        # Only write sections that have at least one parameter present in config_dict
+        section_counter = 1
+        for section_name, param_names in section_configs:
+            # Check if any parameters from this section exist in the config
+            params_in_section = [p for p in param_names if p in config_dict]
+            
+            if params_in_section:
+                _write_config_section(
+                    f, section_name, config_dict, params_in_section, section_counter
+                )
+                section_counter += 1
 
         # Write computed values as comments
         if computed_values:
@@ -639,7 +646,9 @@ def create_config_dict_from_notebook_vars(**kwargs) -> Dict[str, Any]:
     Create a configuration dictionary from notebook variables.
 
     This function takes all the configuration variables from a notebook
-    and packages them into a dictionary suitable for export.
+    and packages them into a dictionary suitable for export. Only includes
+    the parameters that are actually provided, making it generalizable to
+    different analysis types.
 
     Parameters:
     -----------
@@ -649,64 +658,21 @@ def create_config_dict_from_notebook_vars(**kwargs) -> Dict[str, Any]:
     Returns:
     --------
     dict
-        Configuration dictionary
+        Configuration dictionary containing only provided parameters
     """
 
-    # Define all possible configuration parameters with defaults
-    config_template = {
-        # Input files
+    # Define minimal defaults only for essential parameters
+    minimal_defaults = {
+        # Only the most basic file path defaults
         "toolkit_path": ".",
-        "metadata_file": "",
-        "protein_file": "",
-        "peptide_file": "",
-        "remove_common_prefix": True,
-        # Data filtering
-        "min_detection_rate": 0.5,
-        # Normalization
-        "normalization_method": "VSN",
-        "optimize_vsn": False,
-        # Negative value handling
-        "handle_negatives": True,
-        "negative_handling_method": "min_positive",
-        "min_positive_replacement": None,
-        # Statistical analysis
-        "statistical_test_method": "mixed_effects",
-        "analysis_type": "paired",
-        # Experimental design
-        "subject_column": "Subject",
-        "paired_column": "Visit",
-        "paired_label1": "D-02",
-        "paired_label2": "D-13",
-        "group_column": "DrugDose",
-        "group_labels": ["Placebo", "20 mg", "40 mg", "80 mg"],
-        # Mixed-effects model
-        "interaction_terms": ["DrugDose", "Visit"],
-        "additional_interactions": [],
-        "covariates": [],
-        # Control samples
-        "control_column": "Subject",
-        "control_labels": ["HoofPool", "GWPool", "EISAIPool"],
-        # Visualization
-        "use_systematic_colors": True,
-        "systematic_color_palette": "Set1",
-        "group_order": None,
-        "group_colors": None,
-        # Significance thresholds
-        "p_value_threshold": 0.05,
-        "fold_change_threshold": 1.5,
-        "q_value_max": 0.1,
-        "use_adjusted_pvalue": "adjusted",
-        "enable_pvalue_fallback": True,
-        # Output settings
-        "export_results": True,
-        "output_prefix": "proteomics_analysis",
-        "label_top_proteins": 20,
-        "random_seed": 42,
-        "min_samples_per_group": 3,
+        # Everything else should come from the user's configuration
     }
 
-    # Update with provided values
-    config_dict = config_template.copy()
+    # Start with minimal defaults
+    config_dict = minimal_defaults.copy()
+    
+    # Add only the parameters that were actually provided
+    # This ensures the export only contains what the user configured
     config_dict.update(kwargs)
 
     return config_dict
