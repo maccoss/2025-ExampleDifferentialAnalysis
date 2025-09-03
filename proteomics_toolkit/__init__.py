@@ -167,7 +167,7 @@ from .visualization import (
 )
 
 # =============================================================================
-# PUBLIC API - All functions available for import (for advanced users and IDEs)
+# PUBLIC API - All functions available for import
 # =============================================================================
 
 __all__ = [
@@ -190,8 +190,8 @@ __all__ = [
     "apply_systematic_color_scheme", # Consistent colors for groups
     
     # NORMALIZATION - Choose the best method for your data
-    "median_normalize",         # POPULAR: Robust, preserves scale
-    "vsn_normalize",           # POPULAR: Handles heteroscedasticity  
+    "median_normalize",         # Good Starting Point: Robust, preserves scale
+    "vsn_normalize",           # Use for highly variable samples: Handles heteroscedasticity
     "quantile_normalize",      # Strong normalization (identical distributions)
     "mad_normalize",           # Robust to outliers
     "z_score_normalize",       # Standardize to mean=0, std=1
