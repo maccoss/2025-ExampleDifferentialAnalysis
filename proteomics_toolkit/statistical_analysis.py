@@ -1069,6 +1069,35 @@ def run_comprehensive_statistical_analysis(
     # Apply multiple testing correction
     results_df = apply_multiple_testing_correction(results_df, config)
 
+    # Merge with protein annotations if provided
+    if protein_annotations is not None and len(protein_annotations) > 0:
+        print("\nStep 6: Adding protein annotations...")
+        
+        # Get annotation columns (exclude sample columns and duplicates)
+        annotation_cols = ['Protein']
+        potential_cols = ['Description', 'Gene', 'Protein Gene', 'UniProt_Accession', 
+                         'UniProt_Entry_Name', 'UniProt_Database']
+        
+        for col in potential_cols:
+            if col in protein_annotations.columns:
+                annotation_cols.append(col)
+        
+        # Merge statistical results with annotations
+        annotations_subset = protein_annotations[annotation_cols].copy()
+        results_df = results_df.merge(
+            annotations_subset, 
+            on='Protein', 
+            how='left'
+        )
+        
+        # Add Gene column if we have 'Protein Gene' but not 'Gene'
+        if 'Protein Gene' in results_df.columns and 'Gene' not in results_df.columns:
+            results_df['Gene'] = results_df['Protein Gene']
+        
+        print(f"  Added annotation columns: {annotation_cols[1:]}")  # Skip 'Protein' as it's the key
+    else:
+        print("\nStep 6: No protein annotations provided - skipping annotation merge")
+
     # Sort by p-value
     results_df = results_df.sort_values("P.Value")
 

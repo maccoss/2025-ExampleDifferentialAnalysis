@@ -208,6 +208,72 @@ class TestCleanSampleNames:
         expected = {name: name for name in sample_columns}
         assert result == expected
 
+    def test_sample_metadata_mapping_consistency(self):
+        """
+        Test that sample cleaning doesn't break metadata mapping.
+        This addresses the specific issue found in the notebook.
+        """
+        # Simulate the real-world scenario from the notebook
+        original_samples = [
+            "Total-PTE01-511-84A-C4-049 Sum Normalized Area",
+            "Total-PTE02-Hoof18-050 Sum Normalized Area"
+        ]
+        
+        # Clean the sample names
+        result = clean_sample_names(original_samples, auto_detect=True)
+        
+        # Verify that the result is a dictionary mapping original to cleaned names
+        assert isinstance(result, dict)
+        assert len(result) == len(original_samples)
+        
+        # Verify that all original samples are keys
+        for sample in original_samples:
+            assert sample in result
+            
+        # Verify that cleaned names are different (shorter)
+        for original, cleaned in result.items():
+            assert len(cleaned) < len(original)
+            assert isinstance(cleaned, str)
+            assert len(cleaned.strip()) > 0  # Not empty
+            
+    def test_metadata_synchronization_workflow(self):
+        """
+        Test the complete workflow of cleaning sample names and updating metadata.
+        This replicates the fix implemented in the notebook.
+        """
+        # Original data structure from notebook
+        original_samples = [
+            "Total-PTE01-511-84A-C4-049 Sum Normalized Area",
+            "Total-PTE02-Hoof18-050 Sum Normalized Area"
+        ]
+        
+        # Original metadata (keyed by replicate name, not sample column name)
+        original_metadata = {
+            "Total-PTE01-511-84A-C4-049": {"Group": 80, "Subject": "84"},
+            "Total-PTE02-Hoof18-050": {"Group": "HoofPool", "Subject": "HoofPool"}
+        }
+        
+        # Step 1: Clean sample names
+        cleaned_mapping = clean_sample_names(original_samples, auto_detect=True)
+        
+        # Step 2: Update metadata to use cleaned names as keys (the fix)
+        updated_metadata = {}
+        for original_sample, cleaned_sample in cleaned_mapping.items():
+            # Extract replicate name by removing the suffix
+            replicate_name = original_sample.replace(' Sum Normalized Area', '')
+            if replicate_name in original_metadata:
+                updated_metadata[cleaned_sample] = original_metadata[replicate_name]
+        
+        # Verify the fix worked
+        cleaned_samples = list(cleaned_mapping.values())
+        
+        # All cleaned samples should have metadata
+        assert len(updated_metadata) == len(cleaned_samples)
+        for sample in cleaned_samples:
+            assert sample in updated_metadata
+            assert 'Group' in updated_metadata[sample]
+            assert 'Subject' in updated_metadata[sample]
+
 
 class TestMatchSamplesToMetadata:
     """Test sample-to-metadata matching"""

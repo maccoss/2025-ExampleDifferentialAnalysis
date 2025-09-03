@@ -84,18 +84,43 @@ def plot_box_plot(
         # Use the provided group order, filtering to only groups that exist in the data
         final_group_order = [g for g in group_order if g in samples_by_group.keys()]
     else:
-        # Fallback to alphabetical sorting
-        final_group_order = sorted(samples_by_group.keys())
+        # Fallback to alphabetical sorting - convert to strings to handle mixed types
+        final_group_order = sorted(samples_by_group.keys(), key=str)
+
+    # Debug information
+    print(f"Debug: Group order: {final_group_order}")
+    print(f"Debug: samples_by_group keys: {list(samples_by_group.keys())}")
+    print(f"Debug: Total samples to plot: {sum(len(samples_by_group[g]) for g in final_group_order)}")
 
     for group in final_group_order:
-        for sample in sorted(samples_by_group[group]):
-            values = plot_data[sample].dropna()
-            box_data.append(values)
-            positions.append(pos)
-            colors.append(group_colors.get(group, "#7f7f7f"))
-            labels.append(sample)
-            pos += 1
+        if group in samples_by_group:  # Additional safety check
+            for sample in sorted(samples_by_group[group]):
+                if sample in plot_data.columns:  # Ensure sample exists in data
+                    values = plot_data[sample].dropna()
+                    if len(values) > 0:  # Only add if we have data
+                        box_data.append(values)
+                        positions.append(pos)
+                        colors.append(group_colors.get(group, "#7f7f7f"))
+                        labels.append(sample)
+                        pos += 1
+                    else:
+                        print(f"Warning: No data for sample {sample}")
+                else:
+                    print(f"Warning: Sample {sample} not found in data columns")
+        else:
+            print(f"Warning: Group {group} not found in samples_by_group")
+        
         pos += 0.5  # Add space between groups
+
+    print(f"Debug: Final arrays lengths - box_data: {len(box_data)}, positions: {len(positions)}, colors: {len(colors)}, labels: {len(labels)}")
+
+    if len(box_data) == 0:
+        print("Error: No data to plot!")
+        return
+
+    # Ensure all arrays have the same length
+    assert len(box_data) == len(positions) == len(colors) == len(labels), \
+        f"Array length mismatch: box_data={len(box_data)}, positions={len(positions)}, colors={len(colors)}, labels={len(labels)}"
 
     # Create box plots
     bp = ax.boxplot(
