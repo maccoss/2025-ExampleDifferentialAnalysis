@@ -1,10 +1,10 @@
 # Proteomics Analysis Toolkit and Example Workflows
 
-This repository provides a comprehensive **proteomics analysis toolkit** with example workflows for analyzing quantitative proteomics data from Skyline. The toolkit supports end-to-end analysis from data import through statistical analysis and visualization.
+This repository provides a **proteomics analysis toolkit** with example workflows for analyzing quantitative proteomics data from Skyline. The toolkit supports end-to-end analysis from data import through statistical analysis and visualization.
 
 ## Getting Started - Minimal Analysis Notebook
 
-**`Minimal-Analysis.ipynb`** - A streamlined, production-ready notebook that demonstrates the complete analysis workflow in a single, well-documented file.
+**`Minimal-Analysis.ipynb`** - A simple notebook that demonstrates the analysis workflow in a single python notebook.
 
 ### Key Features:
 - **Complete workflow** in one notebook with minimal code
@@ -13,6 +13,7 @@ This repository provides a comprehensive **proteomics analysis toolkit** with ex
 - **Statistical analysis** - mixed-effects models, t-tests, and non-parametric tests
 - **Flexible design** - works with dose-response, time-course, or treatment comparison studies
 - **Export capabilities** - saves results, configuration, and processed data
+- **Automated Tests** - Use pytest for testing
 
 ### Quick Start:
 1. Configure your analysis parameters in the first cell
@@ -81,46 +82,10 @@ The `proteomics_toolkit` package provides modular functions for comprehensive pr
 
 ---
 
-## Example Notebooks
+## Example Notebooks (more to come)
 
-### **Minimal Analysis (RECOMMENDED)**
-- **`EISAI-Minimal-Analysis.ipynb`** - Complete streamlined workflow
-
-### **Detailed Step-by-Step Notebooks**
-
-## 1-import-skyline-output.ipynb
-
-**Legacy Detailed Notebook: Data Import and Processing Pipeline**
-
-This notebook handles the initial data import and processing from Skyline outputs:
-
-- **Data Loading**: Imports protein quantitation matrix and sample metadata from CSV files
-- **Protein Parsing**: Extracts UniProt accession numbers from complex protein identifiers
-- **Sample Name Cleaning**: Removes common prefixes/suffixes and normalizes sample naming
-- **Data Quality Assessment**: Visualizes missing data patterns and detection frequency
-- **Data Structure Creation**: Prepares cleaned datasets for downstream analysis
-
-## 2-normalize-data.ipynb
-
-**Legacy Detailed Notebook: Data Normalization and Quality Control**
-
-This notebook performs comprehensive data normalization and quality assessment:
-
-- **Normalization Methods**: Median normalization and Variance Stabilizing Normalization (VSN)
-- **Quality Control**: Box plots, PCA analysis, and correlation analysis
-- **Control Sample Analysis**: Automated QC pool correlation and clustering analysis
-- **Comparative Analysis**: Before/after normalization comparisons
-
-## 3-differential-analysis.ipynb
-
-**Legacy Detailed Notebook: Statistical Analysis and Differential Expression**
-
-This notebook performs comprehensive differential expression analysis:
-
-- **Statistical Methods**: T-tests, Mann-Whitney U, mixed-effects models, and GLM
-- **Machine Learning**: SVM classification with feature selection
-- **Visualization**: Volcano plots and statistical results tables
-- **Advanced Features**: Covariate adjustment and robust statistical inference
+### **Minimal Analysis**
+- **`Minimal-Analysis.ipynb`** - Complete workflow
 
 ---
 
@@ -204,3 +169,4 @@ The repository includes example CSF proteomics data from an EISAI pilot study de
 ---
 
 *This toolkit provides a comprehensive, production-ready solution for quantitative proteomics analysis from Skyline outputs. The minimal notebook approach ensures reproducible, well-documented analyses suitable for publication and regulatory submissions.*
+
