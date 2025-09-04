@@ -160,7 +160,7 @@ Set all analysis parameters in the comprehensive configuration cell:
 
 ## Example Data
 
-The repository includes example CSF proteomics data from an EISAI pilot study demonstrating:
+The repository includes example CSF proteomics data from an pilot study demonstrating:
 - **Dose-response analysis**: 4 dose levels (0, 20, 40, 80 mg)
 - **Longitudinal design**: Paired samples at baseline (D-02) and follow-up (D-13)
 - **Quality control samples**: Multiple control pools for normalization assessment
@@ -169,4 +169,5 @@ The repository includes example CSF proteomics data from an EISAI pilot study de
 ---
 
 *This toolkit provides a comprehensive, production-ready solution for quantitative proteomics analysis from Skyline outputs. The minimal notebook approach ensures reproducible, well-documented analyses suitable for publication and regulatory submissions.*
+
 
