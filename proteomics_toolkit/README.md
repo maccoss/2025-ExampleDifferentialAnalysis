@@ -67,6 +67,17 @@ ptk.visualization.plot_box_plot(
     sample_metadata=sample_metadata,
     group_colors=group_colors
 )
+
+# 8. Quality Control - CV Distribution for Control Samples
+cv_data = ptk.visualization.plot_control_cv_distribution(
+    data=normalized_data,  # Use median normalized data for CV calculation
+    sample_columns=list(cleaned_names.values()),
+    sample_metadata=sample_metadata,
+    control_column="Sample_Type",  # Or your control column name
+    control_labels=["Pool", "QC", "Reference"],  # Your control labels
+    normalization_method="Median",
+    cv_threshold=20.0
+)
 ```
 
 ## Advanced Features
@@ -179,6 +190,7 @@ pip install -e /path/to/proteomics_toolkit
 - `plot_sample_correlation_heatmap()`: Sample-sample correlation matrix
 - `plot_volcano()`: Volcano plots for differential results
 - `plot_normalization_comparison()`: Before/after normalization comparison
+- `plot_control_cv_distribution()`: CV distribution analysis for control samples
 
 ## Contributing
 

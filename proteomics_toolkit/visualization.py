@@ -1813,3 +1813,171 @@ def plot_individual_control_pool_analysis(
 
         print(f"\n{pool_name} analysis complete!")
         print("-" * 50)
+
+
+def plot_control_cv_distribution(
+    data: pd.DataFrame,
+    sample_columns: List[str],
+    sample_metadata: Dict[str, Dict],
+    control_column: str,
+    control_labels: List[str],
+    normalization_method: str = "Median",
+    figsize: Tuple[int, int] = (18, 6),
+    cv_threshold: float = 20.0,
+    title_suffix: str = ""
+) -> Dict[str, List[float]]:
+    """
+    Create CV distribution histograms for control samples by control type.
+    
+    This function analyzes the coefficient of variance (CV) distribution for each 
+    control type to assess reproducibility between control replicates. Uses median 
+    normalized, non-log transformed data for CV calculations.
+    
+    Parameters:
+    -----------
+    data : pd.DataFrame
+        Protein quantitation data (should be median normalized, non-log transformed)
+    sample_columns : List[str]
+        List of sample column names in the data
+    sample_metadata : Dict[str, Dict]
+        Sample metadata mapping {sample_name: {metadata_dict}}
+    control_column : str
+        Column name in metadata containing control sample designations
+    control_labels : List[str]
+        Labels identifying QC/control samples (e.g., ["HoofPool", "GWPool", "PlatePool"])
+    normalization_method : str, optional
+        Name of normalization method used (for plot title), default "Median"
+    figsize : Tuple[int, int], optional
+        Figure size (width, height), default (18, 6)
+    cv_threshold : float, optional
+        CV threshold line to display (%), default 20.0
+    title_suffix : str, optional
+        Additional text to append to plot title
+        
+    Returns:
+    --------
+    Dict[str, List[float]]
+        Dictionary mapping control type to list of CV values for that type
+        
+    Notes:
+    ------
+    - CV is calculated as (std/mean * 100) for each protein across control samples
+    - Only proteins with positive mean values are included in CV calculations
+    - Lower CV values indicate better reproducibility between control replicates
+    - At least 2 samples of each control type are required for CV calculation
+    """
+    
+    print("=== CONTROL SAMPLE CV DISTRIBUTION ANALYSIS ===")
+    
+    # Get control samples for each control type
+    control_samples_by_type = {}
+    for control_label in control_labels:
+        control_samples_by_type[control_label] = []
+        for sample_name, metadata_dict in sample_metadata.items():
+            if sample_name in sample_columns and metadata_dict.get(control_column) == control_label:
+                control_samples_by_type[control_label].append(sample_name)
+    
+    print("Control samples by type:")
+    for control_type, samples in control_samples_by_type.items():
+        print(f"  {control_type}: {len(samples)} samples")
+    
+    # Calculate CV for each control type
+    cv_data = {}
+    for control_type, control_sample_list in control_samples_by_type.items():
+        if len(control_sample_list) > 1:  # Need at least 2 samples to calculate CV
+            # Get the control sample data
+            control_data = data[control_sample_list]
+            
+            # Calculate CV for each protein across control samples
+            mean_values = control_data.mean(axis=1)
+            std_values = control_data.std(axis=1)
+            
+            # Calculate CV (std/mean * 100) for proteins with non-zero means
+            cv_values = []
+            for i in range(len(mean_values)):
+                if mean_values.iloc[i] > 0:  # Avoid division by zero
+                    cv = (std_values.iloc[i] / mean_values.iloc[i]) * 100
+                    cv_values.append(cv)
+            
+            cv_data[control_type] = cv_values
+            print(f"  {control_type}: {len(cv_values)} proteins with calculable CV")
+        else:
+            cv_data[control_type] = []
+            print(f"  {control_type}: Insufficient samples for CV calculation")
+    
+    # Create the histogram plot
+    fig, axes = plt.subplots(1, len(control_labels), figsize=figsize)
+    if len(control_labels) == 1:
+        axes = [axes]  # Ensure axes is always iterable
+    
+    title = f'Coefficient of Variance Distribution for Control Samples\n({normalization_method} Normalized Data)'
+    if title_suffix:
+        title += f' - {title_suffix}'
+    fig.suptitle(title, fontsize=16, fontweight='bold')
+    
+    for idx, control_type in enumerate(control_labels):
+        ax = axes[idx]
+        cv_values = cv_data.get(control_type, [])
+        
+        if len(cv_values) > 0:
+            # Create histogram
+            n, bins, patches = ax.hist(cv_values, bins=50, alpha=0.7, color='skyblue', 
+                                     edgecolor='black', linewidth=0.5)
+            
+            # Calculate statistics
+            median_cv = np.median(cv_values)
+            mean_cv = np.mean(cv_values)
+            cv_under_threshold = (np.array(cv_values) < cv_threshold).sum() / len(cv_values) * 100
+            cv_under_10 = (np.array(cv_values) < 10).sum() / len(cv_values) * 100
+            
+            # Add vertical line for median CV
+            ax.axvline(median_cv, color='red', linestyle='--', linewidth=2, 
+                       label=f'Median CV: {median_cv:.1f}%')
+            
+            # Add vertical line at CV threshold
+            ax.axvline(cv_threshold, color='orange', linestyle=':', linewidth=2, alpha=0.8,
+                       label=f'{cv_threshold}% CV threshold')
+            
+            # Add text annotation for CV statistics
+            stats_text = f'{cv_under_threshold:.1f}% of proteins\nhave CV < {cv_threshold}%'
+            ax.text(0.95, 0.95, stats_text, 
+                    transform=ax.transAxes, fontsize=11, fontweight='bold',
+                    verticalalignment='top', horizontalalignment='right',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+            
+            # Formatting
+            ax.set_title(f'{control_type} Controls\n({len(control_samples_by_type[control_type])} samples)', 
+                         fontsize=14, fontweight='bold')
+            ax.set_xlabel('Coefficient of Variance (%)', fontsize=12)
+            ax.set_ylabel('Number of Proteins', fontsize=12)
+            ax.legend(fontsize=10)
+            ax.grid(True, alpha=0.3)
+            
+            # Set reasonable x-axis limits
+            ax.set_xlim(0, min(100, np.percentile(cv_values, 99)))
+            
+            # Print detailed statistics
+            print(f"\n{control_type} Statistics:")
+            print(f"  Median CV: {median_cv:.2f}%")
+            print(f"  Mean CV: {mean_cv:.2f}%")
+            print(f"  Proteins with CV < {cv_threshold}%: {cv_under_threshold:.1f}%")
+            print(f"  Proteins with CV < 10%: {cv_under_10:.1f}%")
+            
+        else:
+            # Handle case with insufficient data
+            ax.text(0.5, 0.5, f'Insufficient data\nfor {control_type}\n(need ≥2 samples)', 
+                    transform=ax.transAxes, fontsize=14, 
+                    horizontalalignment='center', verticalalignment='center')
+            ax.set_title(f'{control_type} Controls\n({len(control_samples_by_type.get(control_type, []))} samples)', 
+                         fontsize=14, fontweight='bold')
+            ax.set_xlabel('Coefficient of Variance (%)', fontsize=12)
+            ax.set_ylabel('Number of Proteins', fontsize=12)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    print("\n✓ Control sample CV distribution analysis complete")
+    print(f"Note: CV calculated from {normalization_method.lower()} normalized (non-log transformed) data")
+    print("Lower CV values indicate better reproducibility between control replicates")
+    
+    return cv_data

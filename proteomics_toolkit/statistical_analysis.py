@@ -11,6 +11,7 @@ from scipy.stats import ttest_1samp, ttest_ind, mannwhitneyu, wilcoxon
 from statsmodels.stats.multitest import multipletests
 import warnings
 from .normalization import is_normalization_log_transformed
+from .preprocessing import _normalize_group_value
 
 # Try to import statsmodels for mixed-effects models
 try:
@@ -164,6 +165,9 @@ class StatisticalConfig:
         self.interaction_terms = ["Comparison", "Visit"]
         self.additional_interactions = []
         self.covariates = []
+        
+        # Variable treatment control
+        self.force_categorical = False  # True to treat numeric group variables as categorical factors
 
         # Multiple testing correction
         self.correction_method = "fdr_bh"
@@ -233,6 +237,18 @@ def prepare_metadata_dataframe(sample_metadata_dict, sample_columns, config):
     print(f"  Subjects: {metadata_df[config.subject_column].nunique()}")
     print(f"  Groups: {metadata_df[config.group_column].value_counts().to_dict()}")
     print(f"  Timepoints: {metadata_df[config.paired_column].value_counts().to_dict()}")
+
+    # Handle categorical vs continuous variable treatment
+    if hasattr(config, 'force_categorical') and config.force_categorical:
+        # Convert group column to categorical (string) type to force statsmodels to treat as factors
+        metadata_df[config.group_column] = metadata_df[config.group_column].astype(str)
+        print("  DrugDose variable treatment: CATEGORICAL (converted to string factors)")
+    else:
+        # Ensure group column preserves numeric type if possible (for continuous treatment)
+        # Apply normalization to ensure consistency but preserve numeric types
+        metadata_df[config.group_column] = metadata_df[config.group_column].apply(_normalize_group_value)
+        group_col_type = metadata_df[config.group_column].dtype
+        print(f"  DrugDose variable treatment: CONTINUOUS (type: {group_col_type})")
 
     return metadata_df
 
@@ -963,9 +979,15 @@ def run_comprehensive_statistical_analysis(
 
     # Filter to experimental samples only (exclude controls)
     valid_samples = {}
+    # Normalize group labels once for efficiency
+    normalized_group_labels = [_normalize_group_value(label) for label in config.group_labels]
+    
     for sample_name, metadata in sample_metadata.items():
         comparison_value = metadata.get(config.group_column)
-        if comparison_value in config.group_labels:
+        # Normalize the comparison value for consistent comparison
+        normalized_comparison = _normalize_group_value(comparison_value)
+        
+        if normalized_comparison in normalized_group_labels:
             valid_samples[sample_name] = metadata
 
     print(f"  Valid experimental samples: {len(valid_samples)}")
@@ -977,7 +999,8 @@ def run_comprehensive_statistical_analysis(
         visit = metadata.get(config.paired_column)
         comparison = metadata.get(config.group_column)
 
-        if subject and visit and comparison:
+        # Use 'is not None' instead of truthy check to handle comparison=0
+        if subject and visit and comparison is not None:
             if subject not in pairing_data:
                 pairing_data[subject] = {}
             pairing_data[subject][visit] = {
@@ -985,15 +1008,24 @@ def run_comprehensive_statistical_analysis(
                 "comparison": comparison,
             }
 
-    # Check for complete pairs
+    # Check for complete pairs - handle both categorical and continuous analysis
     complete_pairs = []
     incomplete_subjects = []
+    
+    # Determine if we're doing continuous analysis (FORCE_CATEGORICAL = False for numeric variables)
+    is_continuous_analysis = (
+        hasattr(config, 'force_categorical') and 
+        not config.force_categorical and 
+        all(str(label).replace('.', '').replace('-', '').isdigit() for label in config.group_labels)
+    )
 
     for subject, visits in pairing_data.items():
         if config.paired_label1 in visits and config.paired_label2 in visits:
             baseline = visits[config.paired_label1]
             followup = visits[config.paired_label2]
 
+            # For continuous analysis, we expect same dose at both timepoints (dose-response over time)
+            # For categorical analysis, we expect same group at both timepoints
             if baseline["comparison"] == followup["comparison"]:
                 complete_pairs.append(
                     {
@@ -1011,15 +1043,26 @@ def run_comprehensive_statistical_analysis(
                 f"{subject} (missing visits: {available_visits})"
             )
 
-    # Group complete pairs by treatment group
-    group_pairs = {
-        group: [p for p in complete_pairs if p["group"] == group]
-        for group in config.group_labels
-    }
+    # Group complete pairs by treatment group - normalize for comparison
+    group_pairs = {}
+    for group_label in config.group_labels:
+        normalized_group = _normalize_group_value(group_label)
+        group_pairs[group_label] = [
+            p for p in complete_pairs 
+            if _normalize_group_value(p["group"]) == normalized_group
+        ]
 
-    print("  Complete paired subjects by group:")
-    for group, pairs in group_pairs.items():
-        print(f"    {group}: {len(pairs)} subjects")
+    if is_continuous_analysis:
+        print("  Analysis type: CONTINUOUS dose-response (DrugDose as numeric variable)")
+        print(f"  Complete paired subjects: {len(complete_pairs)} (dose maintained across timepoints)")
+        print("  Dose distribution across complete pairs:")
+        for group, pairs in group_pairs.items():
+            print(f"    {group}: {len(pairs)} subjects")
+    else:
+        print("  Analysis type: CATEGORICAL group comparison")
+        print("  Complete paired subjects by group:")
+        for group, pairs in group_pairs.items():
+            print(f"    {group}: {len(pairs)} subjects")
 
     if incomplete_subjects:
         print(f"  Incomplete subjects: {len(incomplete_subjects)}")
