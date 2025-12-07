@@ -60,11 +60,21 @@ The `proteomics_toolkit` package provides modular functions for comprehensive pr
 
 ### **Statistical Analysis**
 - **Mixed-effects models** - Handles complex experimental designs with random effects
+- **Longitudinal analysis** - F-test for any change over time (categorical timepoints)
+- **Linear trend analysis** - Test for monotonic trends over time/dose (continuous predictor)
 - **T-tests** - Paired and unpaired comparisons with multiple correction
 - **Non-parametric tests** - Mann-Whitney U and Wilcoxon signed-rank tests
 - **Covariate adjustment** - Incorporates additional metadata variables
 - **Multiple testing correction** - Benjamini-Hochberg FDR and other methods
 - **Effect size calculation** - Fold changes and confidence intervals
+
+### **Temporal Clustering & Trend Analysis** (NEW)
+- **K-means clustering** - Cluster proteins by temporal expression patterns
+- **Automatic cluster detection** - Silhouette score optimization for optimal k
+- **Pattern classification** - Sustained increase/decrease, transient responses, U-shaped patterns
+- **Gene set enrichment** - Integration with Enrichr API for pathway analysis per cluster
+- **Visualization** - Publication-ready heatmaps and parallel coordinate plots
+- **Within-subject normalization** - Z-score normalization leveraging paired design
 
 ### **Visualization Suite**
 - **Box plots** - Sample distribution analysis with group coloring
@@ -82,10 +92,18 @@ The `proteomics_toolkit` package provides modular functions for comprehensive pr
 
 ---
 
-## Example Notebooks (more to come)
+## Example Notebooks
 
 ### **Minimal Analysis**
-- **`Minimal-Analysis.ipynb`** - Complete workflow
+- **`Minimal-Proteomics-Analysis.ipynb`** - Complete workflow for dose-response or simple group comparisons
+
+### **Longitudinal Analysis**
+- **`Verapamil-Liraglutide-Separate-Analysis.ipynb`** - Advanced longitudinal proteomics analysis with:
+  - Mixed-effects models for repeated measures
+  - Longitudinal F-test (categorical time) and linear trend analysis
+  - Temporal clustering with automatic cluster optimization
+  - Gene set enrichment via Enrichr API
+  - Separate cohort analysis strategy
 
 ---
 

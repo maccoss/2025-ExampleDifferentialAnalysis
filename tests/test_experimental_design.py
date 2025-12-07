@@ -244,6 +244,7 @@ class TestExperimentalDesignAnalysis:
         
         config = StatisticalConfig()
         config.statistical_test_method = 'mixed_effects'
+        config.analysis_type = 'interaction'  # Required: set analysis type
         config.group_column = 'DrugDose'
         config.group_labels = ['0', '20', '40', '80']
         config.force_categorical = False  # Continuous mode
@@ -279,6 +280,7 @@ class TestExperimentalDesignAnalysis:
         # Test continuous mode
         config_continuous = StatisticalConfig()
         config_continuous.statistical_test_method = 'mixed_effects'
+        config_continuous.analysis_type = 'interaction'  # Required: set analysis type
         config_continuous.group_column = 'DrugDose'
         config_continuous.group_labels = ['0', '20', '40', '80']
         config_continuous.force_categorical = False
@@ -291,6 +293,7 @@ class TestExperimentalDesignAnalysis:
         # Test categorical mode
         config_categorical = StatisticalConfig()
         config_categorical.statistical_test_method = 'mixed_effects'
+        config_categorical.analysis_type = 'interaction'  # Required: set analysis type
         config_categorical.group_column = 'DrugDose'
         config_categorical.group_labels = ['0', '20', '40', '80']
         config_categorical.force_categorical = True

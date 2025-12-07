@@ -24,6 +24,27 @@ except ImportError:
     warnings.warn("statsmodels not available. Mixed-effects models will be disabled.")
 
 
+def _sanitize_formula_term(term):
+    """
+    Sanitize a column name for use in statsmodels formulas.
+    Wraps terms containing spaces or special characters in Q().
+
+    Parameters:
+    -----------
+    term : str
+        Column name to sanitize
+
+    Returns:
+    --------
+    str
+        Sanitized term safe for use in formulas
+    """
+    # Check if term needs quoting (contains spaces or special characters)
+    if ' ' in term or any(char in term for char in [':', '-', '+', '*', '/', '(', ')', '[', ']']):
+        return f'Q("{term}")'
+    return term
+
+
 def _apply_log_transformation_if_needed(data, config):
     """
     Apply log transformation to data if needed based on configuration.
@@ -144,39 +165,53 @@ def _apply_log_transformation_if_needed(data, config):
 
 
 class StatisticalConfig:
-    """Configuration class for statistical analysis parameters"""
+    """Configuration class for statistical analysis parameters
+
+    Supports multiple analysis types:
+    - 'paired': Paired group comparison (requires group_column, paired_label1, paired_label2)
+    - 'unpaired': Unpaired group comparison (requires group_column, group_labels)
+    - 'linear_trend': Linear trend over time/dose (requires time_column, tests slope != 0)
+    - 'longitudinal': Any change over time (requires time_column, F-test on time as factor)
+    - 'interaction': Group × Time interaction (requires group_column, paired_column, interaction_terms)
+    
+    Note: 'dose_response' is accepted as an alias for 'linear_trend' for backward compatibility.
+    """
 
     def __init__(self):
         # Basic analysis parameters
         self.statistical_test_method = "mixed_effects"
-        self.analysis_type = "paired"
+        self.analysis_type = None  # Must be set by user: 'paired', 'unpaired', 'linear_trend', 'longitudinal', 'interaction'
         self.p_value_threshold = 0.05
         self.fold_change_threshold = 1.5
 
-        # Experimental design
-        self.subject_column = "Subject"
-        self.paired_column = "Visit"
-        self.paired_label1 = "D-02"
-        self.paired_label2 = "D-13"
-        self.group_column = "Comparison"
-        self.group_labels = ["Placebo", "Drug"]
+        # Experimental design - set based on analysis type
+        self.subject_column = None  # Required for mixed-effects models
+        self.time_column = None     # For linear_trend/longitudinal analysis (Week, Time, etc.)
+        self.dose_column = None     # Alias for time_column (backward compatibility)
+
+        # Group comparison parameters (for paired/unpaired/interaction analyses)
+        self.group_column = None
+        self.group_labels = []
+
+        # Paired comparison parameters (for paired analysis)
+        self.paired_column = None
+        self.paired_label1 = None
+        self.paired_label2 = None
 
         # Mixed-effects specific
-        self.interaction_terms = ["Comparison", "Visit"]
+        self.interaction_terms = []
         self.additional_interactions = []
         self.covariates = []
-        
+
         # Variable treatment control
-        self.force_categorical = False  # True to treat numeric group variables as categorical factors
+        self.force_categorical = False  # True to treat numeric variables as categorical factors
 
         # Multiple testing correction
         self.correction_method = "fdr_bh"
 
         # P-value selection parameters
         self.use_adjusted_pvalue = "adjusted"  # "adjusted" or "unadjusted"
-        self.enable_pvalue_fallback = (
-            True  # Auto-fallback to unadjusted if no adjusted significant
-        )
+        self.enable_pvalue_fallback = True
 
         # Log transformation parameters
         self.log_transform_before_stats = "auto"  # "auto", True, False
@@ -185,6 +220,55 @@ class StatisticalConfig:
 
         # Normalization method (used for auto log transformation)
         self.normalization_method = None  # Set this to the normalization method used
+
+    def validate(self):
+        """Validate that required parameters are set for the chosen analysis type"""
+        if not self.analysis_type:
+            raise ValueError("analysis_type must be set. Choose: 'paired', 'unpaired', 'linear_trend', 'longitudinal', or 'interaction'")
+
+        # Get time column (time_column preferred, dose_column for backward compatibility)
+        time_col = self.time_column or self.dose_column
+
+        # Validate linear_trend analysis (formerly dose_response)
+        if self.analysis_type in ('linear_trend', 'dose_response'):
+            if not time_col:
+                raise ValueError("linear_trend analysis requires time_column to be set")
+            if self.statistical_test_method == 'mixed_effects' and not self.subject_column:
+                raise ValueError("Mixed-effects linear_trend analysis requires subject_column")
+
+        # Validate longitudinal analysis (F-test for any change over time)
+        elif self.analysis_type == 'longitudinal':
+            if not time_col:
+                raise ValueError("longitudinal analysis requires time_column to be set")
+            if self.statistical_test_method == 'mixed_effects' and not self.subject_column:
+                raise ValueError("Mixed-effects longitudinal analysis requires subject_column")
+
+        # Validate paired group comparison
+        elif self.analysis_type == 'paired':
+            if not self.group_column or not self.group_labels:
+                raise ValueError("paired analysis requires group_column and group_labels")
+            if not self.paired_label1 or not self.paired_label2:
+                raise ValueError("paired analysis requires paired_label1 and paired_label2")
+            if self.statistical_test_method == 'mixed_effects' and not self.subject_column:
+                raise ValueError("Mixed-effects paired analysis requires subject_column")
+
+        # Validate unpaired group comparison
+        elif self.analysis_type == 'unpaired':
+            if not self.group_column or not self.group_labels:
+                raise ValueError("unpaired analysis requires group_column and group_labels")
+
+        # Validate interaction analysis
+        elif self.analysis_type == 'interaction':
+            if not self.group_column or not self.group_labels:
+                raise ValueError("interaction analysis requires group_column and group_labels")
+            if not self.paired_column:
+                raise ValueError("interaction analysis requires paired_column")
+            if not self.interaction_terms:
+                raise ValueError("interaction analysis requires interaction_terms")
+            if self.statistical_test_method == 'mixed_effects' and not self.subject_column:
+                raise ValueError("Mixed-effects interaction analysis requires subject_column")
+
+        return True
 
 
 def prepare_metadata_dataframe(sample_metadata_dict, sample_columns, config):
@@ -205,7 +289,13 @@ def prepare_metadata_dataframe(sample_metadata_dict, sample_columns, config):
     if not metadata_rows:
         print("Warning: No metadata found for any samples - returning empty DataFrame")
         # Return empty DataFrame with expected columns for graceful handling
-        expected_cols = ["Sample", config.subject_column, config.paired_column, config.group_column]
+        expected_cols = ["Sample"]
+        if config.subject_column:
+            expected_cols.append(config.subject_column)
+        if config.paired_column:
+            expected_cols.append(config.paired_column)
+        if hasattr(config, 'group_column') and config.group_column:
+            expected_cols.append(config.group_column)
         return pd.DataFrame(columns=expected_cols)
 
     metadata_df = pd.DataFrame(metadata_rows)
@@ -215,8 +305,27 @@ def prepare_metadata_dataframe(sample_metadata_dict, sample_columns, config):
         print("Empty metadata - skipping validation")
         return metadata_df
 
+    # Build list of required columns based on analysis configuration
+    required_cols = []
+
+    # Subject column is always required for mixed-effects models
+    if config.subject_column:
+        required_cols.append(config.subject_column)
+
+    # Paired/time column is usually required
+    if config.paired_column:
+        required_cols.append(config.paired_column)
+
+    # Group column is only required for group comparison analyses
+    # NOT required for dose-response or continuous predictor models
+    if hasattr(config, 'group_column') and config.group_column:
+        # Only require if we're using interaction terms that include the group column
+        # or if analysis_type indicates group comparison
+        if (config.interaction_terms and config.group_column in config.interaction_terms) or \
+           (hasattr(config, 'analysis_type') and config.analysis_type in ['paired', 'unpaired']):
+            required_cols.append(config.group_column)
+
     # Validate required columns exist
-    required_cols = [config.subject_column, config.paired_column, config.group_column]
     missing_cols = [col for col in required_cols if col not in metadata_df.columns]
     if missing_cols:
         raise ValueError(f"Missing required metadata columns: {missing_cols}")
@@ -235,20 +344,25 @@ def prepare_metadata_dataframe(sample_metadata_dict, sample_columns, config):
 
     print(f"  After filtering: {len(metadata_df)} samples")
     print(f"  Subjects: {metadata_df[config.subject_column].nunique()}")
-    print(f"  Groups: {metadata_df[config.group_column].value_counts().to_dict()}")
-    print(f"  Timepoints: {metadata_df[config.paired_column].value_counts().to_dict()}")
 
-    # Handle categorical vs continuous variable treatment
-    if hasattr(config, 'force_categorical') and config.force_categorical:
-        # Convert group column to categorical (string) type to force statsmodels to treat as factors
-        metadata_df[config.group_column] = metadata_df[config.group_column].astype(str)
-        print("  DrugDose variable treatment: CATEGORICAL (converted to string factors)")
-    else:
-        # Ensure group column preserves numeric type if possible (for continuous treatment)
-        # Apply normalization to ensure consistency but preserve numeric types
-        metadata_df[config.group_column] = metadata_df[config.group_column].apply(_normalize_group_value)
-        group_col_type = metadata_df[config.group_column].dtype
-        print(f"  DrugDose variable treatment: CONTINUOUS (type: {group_col_type})")
+    # Only print group info if group_column is defined and exists in metadata
+    if hasattr(config, 'group_column') and config.group_column and config.group_column in metadata_df.columns:
+        print(f"  Groups: {metadata_df[config.group_column].value_counts().to_dict()}")
+
+        # Handle categorical vs continuous variable treatment
+        if hasattr(config, 'force_categorical') and config.force_categorical:
+            # Convert group column to categorical (string) type to force statsmodels to treat as factors
+            metadata_df[config.group_column] = metadata_df[config.group_column].astype(str)
+            print("  DrugDose variable treatment: CATEGORICAL (converted to string factors)")
+        else:
+            # Ensure group column preserves numeric type if possible (for continuous treatment)
+            # Apply normalization to ensure consistency but preserve numeric types
+            metadata_df[config.group_column] = metadata_df[config.group_column].apply(_normalize_group_value)
+            group_col_type = metadata_df[config.group_column].dtype
+            print(f"  DrugDose variable treatment: CONTINUOUS (type: {group_col_type})")
+
+    if config.paired_column and config.paired_column in metadata_df.columns:
+        print(f"  Timepoints: {metadata_df[config.paired_column].value_counts().to_dict()}")
 
     return metadata_df
 
@@ -332,7 +446,7 @@ def run_paired_t_test(protein_data, metadata_df, config):
 
             results.append(result)
 
-        except Exception as e:
+        except (ValueError, RuntimeError, ZeroDivisionError) as e:
             results.append(_create_empty_result(protein_idx, f"Analysis failed: {e}"))
 
     print(f"✓ Paired t-test completed for {len(results)} proteins")
@@ -342,15 +456,64 @@ def run_paired_t_test(protein_data, metadata_df, config):
 def run_mixed_effects_analysis(
     protein_data, metadata_df, config, protein_annotations=None
 ):
-    """Run mixed-effects model analysis"""
+    """Run mixed-effects model analysis
+    
+    Supports multiple analysis types:
+    - linear_trend (or dose_response): Protein ~ Time + (1|Subject) with continuous time
+      Tests if there is a linear trend over time (slope != 0)
+    - longitudinal: Protein ~ C(Time) + (1|Subject) with categorical time
+      Tests if protein changes at all over time (F-test on time factor)
+    - interaction: Protein ~ Group * Time + (1|Subject)
+      Tests if time effect differs between groups
+    """
 
     if not HAS_STATSMODELS:
         raise ImportError("statsmodels is required for mixed-effects analysis")
 
-    print("Running mixed-effects analysis...")
-    print(
-        f"  Model: Protein ~ {' * '.join(config.interaction_terms)} + (1|{config.subject_column})"
+    # Get time column (time_column preferred, dose_column for backward compatibility)
+    time_col = getattr(config, 'time_column', None) or getattr(config, 'dose_column', None)
+    
+    # Determine if this is a longitudinal (categorical time) analysis
+    is_longitudinal = hasattr(config, 'analysis_type') and config.analysis_type == 'longitudinal'
+    is_linear_trend = hasattr(config, 'analysis_type') and config.analysis_type in ('linear_trend', 'dose_response')
+
+    # Determine model description for logging
+    all_interaction_terms = (
+        config.interaction_terms + config.additional_interactions
     )
+
+    if len(all_interaction_terms) >= 2:
+        term1 = _sanitize_formula_term(all_interaction_terms[0])
+        term2 = _sanitize_formula_term(all_interaction_terms[1])
+        model_desc = f"Protein ~ {term1} * {term2}"
+        if len(all_interaction_terms) > 2:
+            model_desc += " + " + " + ".join(_sanitize_formula_term(t) for t in all_interaction_terms[2:])
+    elif len(all_interaction_terms) == 1:
+        term = _sanitize_formula_term(all_interaction_terms[0])
+        model_desc = f"Protein ~ {term}"
+    elif time_col:
+        time_term = _sanitize_formula_term(time_col)
+        if is_longitudinal:
+            model_desc = f"Protein ~ C({time_term})"  # Categorical time for F-test
+        else:
+            model_desc = f"Protein ~ {time_term}"  # Continuous time for linear trend
+    else:
+        model_desc = "Protein ~ 1"  # Intercept only
+
+    if config.covariates:
+        sanitized_covariates = [_sanitize_formula_term(cov) for cov in config.covariates]
+        model_desc += " + " + " + ".join(sanitized_covariates)
+
+    model_desc += f" + (1|{config.subject_column})"
+
+    print("Running mixed-effects analysis...")
+    if is_longitudinal:
+        print("  Analysis type: LONGITUDINAL (any change over time, F-test)")
+        print("  Tests: Do any timepoints differ from each other?")
+    elif is_linear_trend:
+        print("  Analysis type: LINEAR TREND (continuous time)")
+        print("  Tests: Is there a linear trend over time (slope ≠ 0)?")
+    print(f"  Model: {model_desc}")
 
     results = []
     n_proteins = len(protein_data)
@@ -386,27 +549,48 @@ def run_mixed_effects_analysis(
             continue
 
         try:
-            # Build formula with all interaction terms and additional interactions
+            # Build formula - supports both interaction models and additive models
             all_interaction_terms = (
                 config.interaction_terms + config.additional_interactions
             )
 
-            if len(all_interaction_terms) < 2:
-                raise ValueError("Need at least 2 terms for interaction analysis")
+            formula = None
 
-            # Build main interaction (first two terms)
-            formula = (
-                f"Intensity ~ {all_interaction_terms[0]} * {all_interaction_terms[1]}"
-            )
+            if len(all_interaction_terms) >= 2:
+                # Build interaction model (first two terms)
+                term1 = _sanitize_formula_term(all_interaction_terms[0])
+                term2 = _sanitize_formula_term(all_interaction_terms[1])
+                formula = f"Intensity ~ {term1} * {term2}"
+                # Add additional interaction terms as main effects
+                if len(all_interaction_terms) > 2:
+                    additional_terms = " + ".join(_sanitize_formula_term(t) for t in all_interaction_terms[2:])
+                    formula += f" + {additional_terms}"
 
-            # Add additional interaction terms as main effects
-            if len(all_interaction_terms) > 2:
-                additional_terms = " + ".join(all_interaction_terms[2:])
-                formula += f" + {additional_terms}"
+            elif len(all_interaction_terms) == 1:
+                # Build additive model with single main effect
+                term = _sanitize_formula_term(all_interaction_terms[0])
+                formula = f"Intensity ~ {term}"
+
+            elif time_col:
+                # Build time-based model
+                time_term = _sanitize_formula_term(time_col)
+                if is_longitudinal:
+                    # LONGITUDINAL: Treat time as categorical factor for F-test
+                    formula = f"Intensity ~ C({time_term})"
+                else:
+                    # LINEAR TREND: Treat time as continuous for slope test
+                    formula = f"Intensity ~ {time_term}"
+
+            else:
+                # No main effects specified - need at least one predictor
+                raise ValueError(
+                    "Need at least one predictor variable (interaction_terms, time_column, or covariates)"
+                )
 
             # Add covariates if specified
             if config.covariates:
-                formula += " + " + " + ".join(config.covariates)
+                sanitized_covariates = [_sanitize_formula_term(cov) for cov in config.covariates]
+                formula += " + " + " + ".join(sanitized_covariates)
 
             # Fit mixed-effects model
             if mixedlm is None:
@@ -422,90 +606,163 @@ def run_mixed_effects_analysis(
                 model = mixedlm(
                     formula, protein_df, groups=protein_df[config.subject_column]
                 )
-                fitted_model = model.fit(method="lbfgs")
+
+                # Try robust BFGS method first (more stable than LBFGS)
+                # Fallback to other methods if needed
+                fitted_model = None
+                for method in ['bfgs', 'nm', 'powell', 'lbfgs']:
+                    try:
+                        fitted_model = model.fit(method=method, disp=False)  # type: ignore[call-arg]
+                        break
+                    except (ValueError, RuntimeError, np.linalg.LinAlgError):
+                        continue
+
+                if fitted_model is None:
+                    raise RuntimeError("All optimization methods failed")
 
             # Extract results
             params = fitted_model.params
             pvalues = fitted_model.pvalues
 
-            # Get interaction effect (main result of interest)
-            # Look for any interaction term (statsmodels creates them based on alphabetical order)
+            # Initialize all effect variables
             interaction_coef = np.nan
             interaction_pvalue = np.nan
-
-            # Find interaction parameters (contain both variable names and ":")
-            interaction_candidates = [
-                p
-                for p in params.index
-                if config.interaction_terms[0] in p
-                and config.interaction_terms[1] in p
-                and ":" in p
-            ]
-
-            if interaction_candidates:
-                # Use the first (and typically only) interaction term
-                term_name = interaction_candidates[0]
-                interaction_coef = params[term_name]
-                interaction_pvalue = pvalues[term_name]
-            else:
-                # No interaction parameter found - will use NaN values
-                pass
-
-            # Get main effects with flexible pattern matching
             group_effect = np.nan
             group_pvalue = np.nan
-
-            # Find group effect parameters
-            group_candidates = [
-                p
-                for p in params.index
-                if config.interaction_terms[0] in p
-                and ":" not in p
-                and p != "Intercept"
-            ]
-
-            if group_candidates:
-                term_name = group_candidates[0]
-                group_effect = params[term_name]
-                group_pvalue = pvalues[term_name]
-
-            # Find time effect parameters
             time_effect = np.nan
             time_pvalue = np.nan
 
-            time_candidates = [
-                p
-                for p in params.index
-                if config.interaction_terms[1] in p
-                and ":" not in p
-                and p != "Intercept"
-            ]
+            # Determine primary effect based on model type
+            if len(all_interaction_terms) >= 2:
+                # INTERACTION MODEL: Extract interaction and main effects
 
-            if time_candidates:
-                term_name = time_candidates[0]
-                time_effect = params[term_name]
-                time_pvalue = pvalues[term_name]
+                # Find interaction parameters (contain both variable names and ":")
+                interaction_candidates = [
+                    p
+                    for p in params.index
+                    if config.interaction_terms[0] in p
+                    and config.interaction_terms[1] in p
+                    and ":" in p
+                ]
+
+                if interaction_candidates:
+                    # Use the first (and typically only) interaction term
+                    term_name = interaction_candidates[0]
+                    interaction_coef = params[term_name]
+                    interaction_pvalue = pvalues[term_name]
+
+                # Find group effect parameters
+                group_candidates = [
+                    p
+                    for p in params.index
+                    if config.interaction_terms[0] in p
+                    and ":" not in p
+                    and p != "Intercept"
+                ]
+
+                if group_candidates:
+                    term_name = group_candidates[0]
+                    group_effect = params[term_name]
+                    group_pvalue = pvalues[term_name]
+
+                # Find time effect parameters
+                time_candidates = [
+                    p
+                    for p in params.index
+                    if config.interaction_terms[1] in p
+                    and ":" not in p
+                    and p != "Intercept"
+                ]
+
+                if time_candidates:
+                    term_name = time_candidates[0]
+                    time_effect = params[term_name]
+                    time_pvalue = pvalues[term_name]
+
+            else:
+                # ADDITIVE MODEL: Extract primary predictor effect
+                primary_predictor = None
+
+                if len(all_interaction_terms) == 1:
+                    primary_predictor = all_interaction_terms[0]
+                elif time_col:
+                    primary_predictor = time_col
+
+                if primary_predictor:
+                    # Find the parameter for the primary predictor
+                    primary_candidates = [
+                        p
+                        for p in params.index
+                        if primary_predictor in p
+                        and ":" not in p
+                        and p != "Intercept"
+                    ]
+
+                    if is_longitudinal and len(primary_candidates) > 1:
+                        # LONGITUDINAL: Multiple time coefficients (categorical)
+                        # Use Wald test on all time coefficients together (F-test equivalent)
+                        try:
+                            # Build constraint string for joint Wald test
+                            # Test that ALL time coefficients = 0 simultaneously
+                            constraints = [f"{c} = 0" for c in primary_candidates]
+                            wald_test = fitted_model.wald_test(constraints, scalar=True)
+                            group_pvalue = wald_test.pvalue
+                            # For logFC, use max absolute coefficient as effect size
+                            time_coefficients = [params[c] for c in primary_candidates]
+                            max_abs_idx = np.argmax(np.abs(time_coefficients))
+                            group_effect = time_coefficients[max_abs_idx]
+                        except Exception:
+                            # Fallback: use most significant individual coefficient
+                            min_pval_idx = np.argmin([pvalues[c] for c in primary_candidates])
+                            term_name = primary_candidates[min_pval_idx]
+                            group_effect = params[term_name]
+                            group_pvalue = pvalues[term_name]
+                    elif primary_candidates:
+                        # LINEAR TREND: Single time coefficient (continuous)
+                        term_name = primary_candidates[0]
+                        group_effect = params[term_name]
+                        group_pvalue = pvalues[term_name]
+
+            # Determine primary effect for logFC and P.Value
+            # For interaction models: use interaction term
+            # For additive models: use primary predictor (group_effect)
+            if len(all_interaction_terms) >= 2:
+                primary_logfc = interaction_coef
+                primary_pvalue = interaction_pvalue
+            else:
+                primary_logfc = group_effect
+                primary_pvalue = group_pvalue
+
+            # Determine test method description
+            if is_longitudinal:
+                test_method = "Mixed-effects model (Wald F-test on time)"
+            elif is_linear_trend:
+                test_method = "Mixed-effects model (linear trend)"
+            else:
+                test_method = "Mixed-effects model"
 
             result = {
                 "Protein": actual_protein_name,  # Use actual protein name
-                "logFC": interaction_coef,  # Use interaction as primary effect
+                "logFC": primary_logfc,  # Primary effect (interaction or main effect)
                 "AveExpr": protein_df["Intensity"].mean(),
                 "t": np.nan,  # Not applicable for mixed model
-                "P.Value": interaction_pvalue,  # Use interaction p-value as primary
+                "P.Value": primary_pvalue,  # Primary p-value
                 "B": np.nan,  # Not applicable
                 "group_effect": group_effect,
                 "group_pvalue": group_pvalue,
                 "time_effect": time_effect,
                 "time_pvalue": time_pvalue,
-                "aic": fitted_model.aic,
-                "bic": fitted_model.bic,
+                "interaction_effect": interaction_coef,
+                "interaction_pvalue": interaction_pvalue,
+                "aic": fitted_model.aic if fitted_model else np.nan,
+                "bic": fitted_model.bic if fitted_model else np.nan,
                 "n_obs": len(protein_df),
-                "test_method": "Mixed-effects model",
+                "test_method": test_method,
             }
 
             results.append(result)
 
-        except Exception as e:
+        except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
             error_message = f"Model failed: {e}"
             if i < 3:  # Show details for first few failures
                 print(f"  Protein {i + 1} failed: {error_message}")
@@ -597,7 +854,7 @@ def run_unpaired_t_test(protein_data, metadata_df, config):
 
             results.append(result)
 
-        except Exception as e:
+        except (ValueError, RuntimeError, ZeroDivisionError) as e:
             results.append(_create_empty_result(protein_idx, f"Analysis failed: {e}"))
 
     print(f"✓ Unpaired t-test completed for {len(results)} proteins")
@@ -693,7 +950,7 @@ def run_wilcoxon_test(protein_data, metadata_df, config):
 
             results.append(result)
 
-        except Exception as e:
+        except (ValueError, RuntimeError, ZeroDivisionError) as e:
             results.append(_create_empty_result(protein_idx, f"Analysis failed: {e}"))
 
     print(f"✓ Wilcoxon signed-rank test completed for {len(results)} proteins")
@@ -749,8 +1006,11 @@ def run_mann_whitney_test(protein_data, metadata_df, config):
 
         try:
             # Mann-Whitney U test
+            # Convert to float arrays to ensure scipy compatibility
+            group1_arr = np.asarray(group1_data, dtype=float)
+            group2_arr = np.asarray(group2_data, dtype=float)
             statistic, p_value = mannwhitneyu(
-                group2_data, group1_data, alternative='two-sided'
+                group2_arr, group1_arr, alternative='two-sided'
             )
 
             # Calculate effect size (r = z / sqrt(N))
@@ -783,7 +1043,7 @@ def run_mann_whitney_test(protein_data, metadata_df, config):
 
             results.append(result)
 
-        except Exception as e:
+        except (ValueError, RuntimeError, ZeroDivisionError) as e:
             results.append(_create_empty_result(protein_idx, f"Analysis failed: {e}"))
 
     print(f"✓ Mann-Whitney U test completed for {len(results)} proteins")
@@ -930,6 +1190,12 @@ def run_comprehensive_statistical_analysis(
     print("COMPREHENSIVE STATISTICAL ANALYSIS")
     print("=" * 60)
 
+    # Validate configuration
+    try:
+        config.validate()
+    except ValueError as e:
+        raise ValueError(f"Configuration error: {e}") from e
+
     # Step 0: Handle log transformation if needed
     statistical_data = _apply_log_transformation_if_needed(normalized_data, config)
 
@@ -955,18 +1221,26 @@ def run_comprehensive_statistical_analysis(
     # IMPORTANT: With standardized data structure, sample columns start at index 5
     # First 5 columns are always: Protein, Description, Protein Gene, UniProt_Accession, UniProt_Entry_Name
     if len(normalized_data.columns) > 5:
-        sample_columns = list(
+        all_sample_columns = list(
             normalized_data.columns[5:]
         )  # Everything after first 5 annotation columns
         print(
-            f"  Using standardized data structure: {len(sample_columns)} sample columns (columns 6+)"
+            f"  Using standardized data structure: {len(all_sample_columns)} sample columns (columns 6+)"
         )
     else:
         # Fallback for legacy data (shouldn't happen with create_standard_data_structure)
-        sample_columns = normalized_data.select_dtypes(
+        all_sample_columns = normalized_data.select_dtypes(
             include=[np.number]
         ).columns.tolist()
-        print(f"  Using legacy detection: {len(sample_columns)} sample columns")
+        print(f"  Using legacy detection: {len(all_sample_columns)} sample columns")
+
+    # Filter to only samples that have metadata
+    sample_columns = [col for col in all_sample_columns if col in sample_metadata]
+
+    if len(sample_columns) < len(all_sample_columns):
+        print(
+            f"  Filtered to {len(sample_columns)} samples with metadata (from {len(all_sample_columns)} total)"
+        )
 
     print(
         f"  Sample columns: {sample_columns[:3]}{'...' if len(sample_columns) > 3 else ''}"
@@ -977,98 +1251,119 @@ def run_comprehensive_statistical_analysis(
     # Step 3: Analyze experimental design
     print("\nStep 2: Analyzing experimental design...")
 
-    # Filter to experimental samples only (exclude controls)
-    valid_samples = {}
-    # Normalize group labels once for efficiency
-    normalized_group_labels = [_normalize_group_value(label) for label in config.group_labels]
-    
-    for sample_name, metadata in sample_metadata.items():
-        comparison_value = metadata.get(config.group_column)
-        # Normalize the comparison value for consistent comparison
-        normalized_comparison = _normalize_group_value(comparison_value)
-        
-        if normalized_comparison in normalized_group_labels:
-            valid_samples[sample_name] = metadata
-
-    print(f"  Valid experimental samples: {len(valid_samples)}")
-
-    # Analyze subject pairing structure
-    pairing_data = {}
-    for sample_name, metadata in valid_samples.items():
-        subject = metadata.get(config.subject_column)
-        visit = metadata.get(config.paired_column)
-        comparison = metadata.get(config.group_column)
-
-        # Use 'is not None' instead of truthy check to handle comparison=0
-        if subject and visit and comparison is not None:
-            if subject not in pairing_data:
-                pairing_data[subject] = {}
-            pairing_data[subject][visit] = {
-                "sample": sample_name,
-                "comparison": comparison,
-            }
-
-    # Check for complete pairs - handle both categorical and continuous analysis
-    complete_pairs = []
-    incomplete_subjects = []
-    
-    # Determine if we're doing continuous analysis (FORCE_CATEGORICAL = False for numeric variables)
-    is_continuous_analysis = (
-        hasattr(config, 'force_categorical') and 
-        not config.force_categorical and 
-        all(str(label).replace('.', '').replace('-', '').isdigit() for label in config.group_labels)
+    # Check if this is a time-based analysis (no group comparison)
+    is_time_based = (
+        hasattr(config, 'analysis_type') and 
+        config.analysis_type in ('linear_trend', 'dose_response', 'longitudinal')
+    ) or (
+        not hasattr(config, 'group_labels') or not config.group_labels or
+        not hasattr(config, 'group_column') or not config.group_column
     )
 
-    for subject, visits in pairing_data.items():
-        if config.paired_label1 in visits and config.paired_label2 in visits:
-            baseline = visits[config.paired_label1]
-            followup = visits[config.paired_label2]
-
-            # For continuous analysis, we expect same dose at both timepoints (dose-response over time)
-            # For categorical analysis, we expect same group at both timepoints
-            if baseline["comparison"] == followup["comparison"]:
-                complete_pairs.append(
-                    {
-                        "subject": subject,
-                        "group": baseline["comparison"],
-                        "baseline_sample": baseline["sample"],
-                        "followup_sample": followup["sample"],
-                    }
-                )
-            else:
-                incomplete_subjects.append(f"{subject} (mixed groups)")
+    if is_time_based:
+        # For time-based analyses, all samples are valid (no group filtering needed)
+        valid_samples = sample_metadata.copy()
+        if config.analysis_type == 'longitudinal':
+            print("  Analysis type: LONGITUDINAL (F-test for any change over time)")
+        elif config.analysis_type in ('linear_trend', 'dose_response'):
+            print("  Analysis type: LINEAR TREND (testing if slope ≠ 0)")
         else:
-            available_visits = list(visits.keys())
-            incomplete_subjects.append(
-                f"{subject} (missing visits: {available_visits})"
-            )
-
-    # Group complete pairs by treatment group - normalize for comparison
-    group_pairs = {}
-    for group_label in config.group_labels:
-        normalized_group = _normalize_group_value(group_label)
-        group_pairs[group_label] = [
-            p for p in complete_pairs 
-            if _normalize_group_value(p["group"]) == normalized_group
-        ]
-
-    if is_continuous_analysis:
-        print("  Analysis type: CONTINUOUS dose-response (DrugDose as numeric variable)")
-        print(f"  Complete paired subjects: {len(complete_pairs)} (dose maintained across timepoints)")
-        print("  Dose distribution across complete pairs:")
-        for group, pairs in group_pairs.items():
-            print(f"    {group}: {len(pairs)} subjects")
+            print("  Analysis type: Time-based (no group filtering)")
+        print(f"  Valid experimental samples: {len(valid_samples)}")
     else:
-        print("  Analysis type: CATEGORICAL group comparison")
-        print("  Complete paired subjects by group:")
-        for group, pairs in group_pairs.items():
-            print(f"    {group}: {len(pairs)} subjects")
+        # Filter to experimental samples only (exclude controls) for group comparison
+        valid_samples = {}
+        # Normalize group labels once for efficiency
+        normalized_group_labels = [_normalize_group_value(label) for label in config.group_labels]
 
-    if incomplete_subjects:
-        print(f"  Incomplete subjects: {len(incomplete_subjects)}")
-        if len(incomplete_subjects) <= 5:  # Show details if few
-            for subject_info in incomplete_subjects:
-                print(f"    {subject_info}")
+        for sample_name, metadata in sample_metadata.items():
+            comparison_value = metadata.get(config.group_column)
+            # Normalize the comparison value for consistent comparison
+            normalized_comparison = _normalize_group_value(comparison_value)
+
+            if normalized_comparison in normalized_group_labels:
+                valid_samples[sample_name] = metadata
+
+        print(f"  Valid experimental samples: {len(valid_samples)}")
+
+    # Analyze subject pairing structure (only for group comparison, not time-based analysis)
+    if not is_time_based:
+        pairing_data = {}
+        for sample_name, metadata in valid_samples.items():
+            subject = metadata.get(config.subject_column)
+            visit = metadata.get(config.paired_column)
+            comparison = metadata.get(config.group_column)
+
+            # Use 'is not None' instead of truthy check to handle comparison=0
+            if subject and visit and comparison is not None:
+                if subject not in pairing_data:
+                    pairing_data[subject] = {}
+                pairing_data[subject][visit] = {
+                    "sample": sample_name,
+                    "comparison": comparison,
+                }
+
+        # Check for complete pairs - handle both categorical and continuous analysis
+        complete_pairs = []
+        incomplete_subjects = []
+
+        # Determine if we're doing continuous analysis (FORCE_CATEGORICAL = False for numeric variables)
+        is_continuous_analysis = (
+            hasattr(config, 'force_categorical') and
+            not config.force_categorical and
+            all(str(label).replace('.', '').replace('-', '').isdigit() for label in config.group_labels)
+        )
+
+        for subject, visits in pairing_data.items():
+            if config.paired_label1 in visits and config.paired_label2 in visits:
+                baseline = visits[config.paired_label1]
+                followup = visits[config.paired_label2]
+
+                # For continuous analysis, we expect same dose at both timepoints (dose-response over time)
+                # For categorical analysis, we expect same group at both timepoints
+                if baseline["comparison"] == followup["comparison"]:
+                    complete_pairs.append(
+                        {
+                            "subject": subject,
+                            "group": baseline["comparison"],
+                            "baseline_sample": baseline["sample"],
+                            "followup_sample": followup["sample"],
+                        }
+                    )
+                else:
+                    incomplete_subjects.append(f"{subject} (mixed groups)")
+            else:
+                available_visits = list(visits.keys())
+                incomplete_subjects.append(
+                    f"{subject} (missing visits: {available_visits})"
+                )
+
+        # Group complete pairs by treatment group - normalize for comparison
+        group_pairs = {}
+        for group_label in config.group_labels:
+            normalized_group = _normalize_group_value(group_label)
+            group_pairs[group_label] = [
+                p for p in complete_pairs
+                if _normalize_group_value(p["group"]) == normalized_group
+            ]
+
+        if is_continuous_analysis:
+            print("  Analysis type: CONTINUOUS dose-response (DrugDose as numeric variable)")
+            print(f"  Complete paired subjects: {len(complete_pairs)} (dose maintained across timepoints)")
+            print("  Dose distribution across complete pairs:")
+            for group, pairs in group_pairs.items():
+                print(f"    {group}: {len(pairs)} subjects")
+        else:
+            print("  Analysis type: CATEGORICAL group comparison")
+            print("  Complete paired subjects by group:")
+            for group, pairs in group_pairs.items():
+                print(f"    {group}: {len(pairs)} subjects")
+
+        if incomplete_subjects:
+            print(f"  Incomplete subjects: {len(incomplete_subjects)}")
+            if len(incomplete_subjects) <= 5:  # Show details if few
+                for subject_info in incomplete_subjects:
+                    print(f"    {subject_info}")
 
     # Step 4: Run statistical analysis
     print(f"\nStep 3: Running {config.statistical_test_method} analysis...")
@@ -1078,10 +1373,24 @@ def run_comprehensive_statistical_analysis(
     filtered_protein_data = statistical_data[available_samples]
 
     print(f"  Method: {config.statistical_test_method}")
+    print(f"  Analysis type: {config.analysis_type if config.analysis_type else 'not specified'}")
     print(f"  Proteins: {len(filtered_protein_data)}")
     print(f"  Samples: {len(available_samples)}")
-    print(f"  Groups: {config.group_labels}")
-    print(f"  Timepoints: {config.paired_label1} -> {config.paired_label2}")
+
+    # Print analysis-specific parameters
+    time_col = getattr(config, 'time_column', None) or getattr(config, 'dose_column', None)
+    if config.analysis_type in ('linear_trend', 'dose_response', 'longitudinal'):
+        if time_col:
+            print(f"  Time variable: {time_col}")
+    elif config.analysis_type in ['paired', 'unpaired', 'interaction']:
+        if config.group_labels:
+            print(f"  Groups: {config.group_labels}")
+        if config.paired_label1 and config.paired_label2:
+            print(f"  Timepoints: {config.paired_label1} -> {config.paired_label2}")
+
+    # Print subject grouping for mixed-effects
+    if config.subject_column:
+        print(f"  Subject grouping: {config.subject_column}")
 
     if config.statistical_test_method == "mixed_effects":
         print(

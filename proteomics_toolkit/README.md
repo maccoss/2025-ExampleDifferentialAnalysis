@@ -9,13 +9,18 @@ A comprehensive Python toolkit for analyzing mass spectrometry-based proteomics 
 - **preprocessing**: Data quality assessment, filtering, and annotation parsing  
 - **normalization**: Multiple normalization methods (median, VSN, quantile)
 - **differential**: Statistical analysis for differential protein expression
-- **visualization**: Professional plots for data interpretation
+- **visualization**: Professional plots for data interpretation, including grouped heatmaps and trajectory plots
+- **temporal_clustering**: Temporal trend analysis with K-means clustering
+- **enrichment**: Gene set enrichment analysis via Enrichr API (works with any gene list)
 
 ### 🎯 Key Capabilities
 - **Automated Control Detection**: Intelligent identification of QC, pool, and reference samples ([guide](README_control_identification.md))
 - **Flexible Data Import**: Support for Skyline protein/peptide quantitation files
 - **Multi-method Normalization**: Choose the best normalization for your data
-- **Statistical Analysis**: Paired/unpaired differential expression with effect sizes  
+- **Statistical Analysis**: Mixed-effects models with longitudinal analysis support
+- **Temporal Clustering**: K-means clustering of temporal protein trends
+- **Gene Set Enrichment**: Enrichr API integration for pathway analysis on any gene list
+- **Grouped Visualizations**: Generalized heatmaps and trajectory plots for any grouped data
 - **Professional Visualization**: Consistent color schemes and publication-ready plots
 
 ## Quick Start
@@ -139,6 +144,28 @@ diff_results = ptk.differential.run_differential_analysis(
     analysis_type='unpaired'
 )
 diff_results = ptk.differential.calculate_effect_sizes(diff_results)
+
+# Longitudinal analysis with mixed-effects models
+config = ptk.StatisticalConfig()
+config.analysis_type = "longitudinal"  # F-test for any change over time
+config.statistical_test_method = "mixed_effects"
+config.subject_column = "Subject"
+config.time_column = "Week"  # Categorical time variable
+config.covariates = []  # Empty to avoid confounding with random intercept
+
+results = ptk.run_comprehensive_statistical_analysis(
+    normalized_data=normalized_data,
+    sample_metadata=sample_metadata,
+    config=config
+)
+
+# Linear trend analysis (continuous time/dose)
+config.analysis_type = "linear_trend"  # Test if slope != 0
+results = ptk.run_comprehensive_statistical_analysis(
+    normalized_data=normalized_data,
+    sample_metadata=sample_metadata,
+    config=config
+)
 ```
 
 ## Installation
@@ -156,6 +183,7 @@ pip install -e /path/to/proteomics_toolkit
 - seaborn >= 0.11.0
 - scikit-learn >= 1.0.0
 - statsmodels >= 0.12.0
+- requests >= 2.25.0 (for Enrichr API in temporal_clustering)
 
 ## Module Overview
 
@@ -191,6 +219,113 @@ pip install -e /path/to/proteomics_toolkit
 - `plot_volcano()`: Volcano plots for differential results
 - `plot_normalization_comparison()`: Before/after normalization comparison
 - `plot_control_cv_distribution()`: CV distribution analysis for control samples
+- `plot_grouped_heatmap()`: Heatmap for any grouped data (clusters, treatments, doses)
+- `plot_grouped_trajectories()`: Line plots for grouped trajectories (temporal, dose-response)
+- `plot_protein_profile()`: Single protein expression profile across conditions
+
+### enrichment.py
+General-purpose gene set enrichment analysis via the Enrichr API.
+
+**Configuration:**
+- `EnrichmentConfig`: Dataclass for configuring libraries, thresholds, and API settings
+
+**Core Functions:**
+- `query_enrichr()`: Query the Enrichr API directly with a gene list
+- `parse_enrichr_results()`: Parse raw API results into a tidy DataFrame
+- `run_enrichment_analysis()`: Complete enrichment analysis on a gene list
+- `run_enrichment_by_group()`: Run enrichment for each group (clusters, categories, etc.)
+- `run_differential_enrichment()`: Run enrichment on up/down-regulated genes from differential analysis
+
+**Visualization:**
+- `plot_enrichment_barplot()`: Horizontal bar plots of enrichment results
+- `plot_enrichment_comparison()`: Dot plots comparing enrichment across groups
+
+**Utilities:**
+- `get_available_libraries()`: List commonly used Enrichr libraries
+- `merge_enrichment_results()`: Merge multiple enrichment DataFrames
+
+**Example Usage:**
+```python
+import proteomics_toolkit as ptk
+
+# Enrichment on a gene list (any source)
+gene_list = ['TP53', 'BRCA1', 'BRCA2', 'ATM', 'CHEK2']
+enrichment = ptk.run_enrichment_analysis(gene_list)
+
+# Enrichment on differential expression results
+enrichment_by_direction = ptk.run_differential_enrichment(
+    stats_results,
+    logfc_threshold=1.0,
+    pvalue_threshold=0.05
+)
+
+# Enrichment by cluster or group
+enrichment_by_cluster = ptk.run_enrichment_by_group(
+    clustered_df,
+    group_column='Cluster_Name',
+    gene_column='Gene'
+)
+
+# Visualize results
+fig = ptk.plot_enrichment_barplot(enrichment, title='Top Pathways')
+fig = ptk.plot_enrichment_comparison(enrichment_by_cluster, title='Cluster Comparison')
+```
+
+### temporal_clustering.py
+Comprehensive module for analyzing temporal/longitudinal proteomics data.
+
+**Configuration:**
+- `TemporalClusteringConfig`: Dataclass for configuring clustering, significance, and visualization settings
+
+**Core Analysis Functions:**
+- `calculate_temporal_means()`: Calculate mean protein abundance at each timepoint across subjects
+- `cluster_temporal_trends()`: K-means or hierarchical clustering of temporal trajectories
+- `name_clusters_by_pattern()`: Assign descriptive names (e.g., "Sustained Increase", "Early Response") to clusters
+- `classify_trend_pattern()`: Classify individual protein temporal patterns
+- `merge_with_statistics()`: Combine temporal data with differential expression results
+- `filter_significant_proteins()`: Filter to statistically significant proteins only
+
+**Gene Set Enrichment (via Enrichr API):**
+- `query_enrichr()`: Query the Enrichr API for gene set enrichment analysis
+- `run_enrichment_by_cluster()`: Run enrichment analysis for each cluster
+
+**Visualization:**
+- `plot_cluster_heatmap()`: Heatmap of protein expression organized by cluster
+- `plot_cluster_parallel_coordinates()`: Parallel coordinate plots for temporal patterns
+- `plot_enrichment_barplot()`: Horizontal bar plots of enrichment results
+- `plot_enrichment_comparison()`: Dot plots comparing enrichment across clusters
+
+**Complete Pipeline:**
+- `run_temporal_analysis()`: Complete temporal analysis pipeline including clustering, visualization, and enrichment
+
+**Example Usage:**
+```python
+import proteomics_toolkit as ptk
+
+# Configure temporal analysis
+config = ptk.TemporalClusteringConfig(
+    n_clusters=4,
+    p_value_threshold=0.05,
+    linewidth=2.0,
+    alpha=0.4
+)
+
+# Run complete analysis
+results = ptk.run_temporal_analysis(
+    data_df=normalized_data,
+    metadata_dict=sample_metadata_dict,
+    stat_results=statistical_results,
+    treatment_name='Verapamil',
+    config=config,
+    run_enrichment=True
+)
+
+# Access individual results
+print(f"Significant proteins: {len(results['sig_df'])}")
+fig_heatmap = results['fig_heatmap']
+fig_parallel = results['fig_parallel']
+enrichment = results.get('enrichment_results', {})
+```
 
 ## Contributing
 

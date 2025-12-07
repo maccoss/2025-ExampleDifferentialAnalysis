@@ -7,9 +7,35 @@ Functions for creating plots and visualizations for proteomics data analysis.
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import seaborn as sns
-from typing import Dict, List, Optional, Tuple, Literal
+from typing import Dict, List, Optional, Tuple, Literal, Union
 import warnings
+
+
+def _color_to_rgba(color: Union[str, tuple, np.ndarray]) -> tuple:
+    """
+    Convert any color format (hex string, named color, RGB tuple, etc.) to RGBA tuple.
+    
+    Parameters:
+    -----------
+    color : str, tuple, or np.ndarray
+        Color in any matplotlib-compatible format
+        
+    Returns:
+    --------
+    tuple
+        RGBA tuple with values in range [0, 1]
+    """
+    if isinstance(color, np.ndarray):
+        # Already an array (e.g., from colormap)
+        return tuple(color)
+    elif isinstance(color, (list, tuple)):
+        # Already RGB/RGBA tuple
+        return tuple(color)
+    else:
+        # String color (hex or named) - convert to RGBA
+        return mcolors.to_rgba(color)
 
 
 def plot_box_plot(
@@ -625,11 +651,14 @@ def plot_sample_correlation_triangular_heatmap(
     method: Literal["pearson", "kendall", "spearman"] = "pearson",
     group_colors: Optional[Dict[str, str]] = None,
     show_clustering: bool = True,
-    label_fontsize: int = 10,
-    annot_fontsize: int = 8,
+    label_fontsize: int = 14,
+    annot_fontsize: int = 10,
+    group_column: str = "Study",
+    max_samples_for_annotations: int = 30,
+    cmap: str = "coolwarm",
 ) -> None:
     """
-    Plot triangular correlation heatmap between samples with improved label visibility.
+    Plot triangular correlation heatmap between samples with color bars for group identification.
 
     Parameters:
     -----------
@@ -642,7 +671,7 @@ def plot_sample_correlation_triangular_heatmap(
     figsize : Tuple[int, int]
         Figure size
     method : str
-        Correlation method ('pearson', 'spearman')
+        Correlation method ('pearson', 'spearman', 'kendall')
     group_colors : Optional[Dict[str, str]]
         Dictionary mapping group names to colors. If None, colors are auto-generated.
     show_clustering : bool
@@ -651,40 +680,75 @@ def plot_sample_correlation_triangular_heatmap(
         Font size for sample labels
     annot_fontsize : int
         Font size for correlation value annotations
+    group_column : str
+        Column name in metadata to use for grouping (default: "Study")
+    max_samples_for_annotations : int
+        Maximum number of samples to show correlation values (default: 30)
+    cmap : str
+        Colormap for correlation values (default: "coolwarm")
     """
+    from matplotlib.patches import Patch
 
     # Calculate correlation matrix
     sample_data = data[sample_columns]
     correlation_matrix = sample_data.corr(method=method)
 
+    # Helper function to check for NA-like values (None, NaN, "na", "nan", "")
+    def _is_na_value(val):
+        if val is None:
+            return True
+        if isinstance(val, float) and pd.isna(val):
+            return True
+        if isinstance(val, str) and val.lower() in ('na', 'nan', ''):
+            return True
+        return False
+
     # Create group color annotations for sample labels
     groups = []
     for sample in sample_columns:
-        group = sample_metadata.get(sample, {}).get("Group", "Unknown")
-        if pd.isna(group):
+        meta = sample_metadata.get(sample, {})
+        # Try the specified group_column first, then fall back to alternatives
+        group = meta.get(group_column)
+        
+        if _is_na_value(group):
+            group = meta.get("Sample Category")
+        if _is_na_value(group):
+            group = meta.get("Group")
+        if _is_na_value(group):
             group = "Unknown"
-        groups.append(group)
-    unique_groups = list(set(groups))
+        groups.append(str(group))
+    
+    unique_groups = sorted(set(groups))
 
     # Use provided group colors or create color palette for groups
     if group_colors is None:
-        colors = plt.cm.tab10(np.linspace(0, 1, len(unique_groups)))
-        group_color_map = {group: colors[i] for i, group in enumerate(unique_groups)}
+        # Use a distinct color palette
+        if len(unique_groups) <= 10:
+            color_palette = plt.cm.tab10(np.linspace(0, 1, 10))
+        else:
+            color_palette = plt.cm.tab20(np.linspace(0, 1, 20))
+        group_color_map = {group: color_palette[i % len(color_palette)] for i, group in enumerate(unique_groups)}
     else:
         group_color_map = group_colors.copy()
         # Add any missing groups with default colors
-        colors = plt.cm.tab10(np.linspace(0, 1, len(unique_groups)))
+        color_palette = plt.cm.tab10(np.linspace(0, 1, 10))
         for i, group in enumerate(unique_groups):
             if group not in group_color_map:
-                group_color_map[group] = colors[i % len(colors)]
+                group_color_map[group] = color_palette[i % len(color_palette)]
 
-    # Create color mapping for individual samples
-    sample_colors = []
+    # Create color mapping for individual samples (in original order)
+    sample_colors_orig = []
     for sample in sample_columns:
-        group = sample_metadata.get(sample, {}).get("Group", "Unknown")
-        if pd.isna(group):
+        meta = sample_metadata.get(sample, {})
+        group = meta.get(group_column)
+        # Reuse the same NA check logic
+        if _is_na_value(group):
+            group = meta.get("Sample Category")
+        if _is_na_value(group):
+            group = meta.get("Group")
+        if _is_na_value(group):
             group = "Unknown"
-        sample_colors.append(group_color_map[group])
+        sample_colors_orig.append(group_color_map[str(group)])
 
     if show_clustering:
         # Perform hierarchical clustering
@@ -704,71 +768,133 @@ def plot_sample_correlation_triangular_heatmap(
         # Reorder correlation matrix and labels
         ordered_samples = [sample_columns[i] for i in cluster_order]
         correlation_matrix = correlation_matrix.loc[ordered_samples, ordered_samples]
-        sample_colors = [sample_colors[i] for i in cluster_order]
+        sample_colors = [sample_colors_orig[i] for i in cluster_order]
     else:
         ordered_samples = sample_columns
+        sample_colors = sample_colors_orig
 
-    # Create figure with larger size for better visibility
-    fig, ax = plt.subplots(figsize=figsize)
+    n_samples = len(ordered_samples)
+    show_annotations = n_samples <= max_samples_for_annotations
 
+    # Create figure - we'll use mpl_toolkits for proper alignment
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    
+    fig, ax_heatmap = plt.subplots(figsize=figsize)
+    
     # Create a mask for the upper triangle to show only lower triangle (excluding diagonal)
     mask = np.triu(np.ones_like(correlation_matrix, dtype=bool), k=1)
 
-    # Create the triangular heatmap
-    sns.heatmap(
+    # Create the triangular heatmap with improved colorbar settings
+    heatmap = sns.heatmap(
         correlation_matrix,
         mask=mask,  # Show only lower triangle + diagonal
-        annot=True,  # Show correlation values
-        fmt=".3f",  # Format correlation values
-        cmap="RdYlBu_r",  # Color scheme: red=low, blue=high
+        annot=show_annotations,  # Only show correlation values if not too many samples
+        fmt=".2f" if show_annotations else "",  # Format correlation values
+        cmap=cmap,  # Better colormap for correlation
+        vmin=0.5,  # Set reasonable min for correlation (adjust based on your data)
+        vmax=1.0,  # Max correlation
         square=True,  # Square aspect ratio
-        linewidths=0.5,  # Grid lines
-        cbar_kws={"label": f"{method.title()} Correlation"},
-        ax=ax,
-        annot_kws={"size": annot_fontsize},
-    )  # Annotation font size
-
-    # Improve label visibility
-    ax.set_xticklabels(
-        ax.get_xticklabels(), rotation=45, ha="right", fontsize=label_fontsize
+        linewidths=0.5 if n_samples <= 50 else 0.1,  # Thinner lines for many samples
+        cbar_kws={
+            "label": f"{method.title()} Correlation", 
+            "shrink": 0.5,  # Reduced height to better match triangular heatmap
+            "aspect": 20,   # Narrower colorbar
+        },
+        ax=ax_heatmap,
+        annot_kws={"size": annot_fontsize} if show_annotations else {},
     )
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=label_fontsize)
-    ax.set_xlabel("Samples", fontsize=label_fontsize + 2)
-    ax.set_ylabel("Samples", fontsize=label_fontsize + 2)
+    
+    # Increase colorbar label and tick font sizes
+    cbar = heatmap.collections[0].colorbar
+    cbar.ax.set_ylabel(f"{method.title()} Correlation", fontsize=label_fontsize + 2, fontweight='bold')
+    cbar.ax.tick_params(labelsize=label_fontsize)
+
+    # Set tick labels
+    if n_samples <= 50:
+        ax_heatmap.set_xticklabels(
+            ax_heatmap.get_xticklabels(), rotation=45, ha="right", fontsize=label_fontsize
+        )
+        ax_heatmap.set_yticklabels(ax_heatmap.get_yticklabels(), rotation=0, fontsize=label_fontsize)
+    else:
+        # Too many samples - hide tick labels
+        ax_heatmap.set_xticklabels([])
+        ax_heatmap.set_yticklabels([])
+    
+    ax_heatmap.set_xlabel("")
+    ax_heatmap.set_ylabel("")
 
     clustering_text = " (Clustered)" if show_clustering else ""
-    ax.set_title(
-        f"Sample Correlation Heatmap - Triangular{clustering_text}\n{method.title()} Correlation",
-        fontsize=label_fontsize + 4,
+    ax_heatmap.set_title(
+        f"Sample Correlation Heatmap{clustering_text}\n{method.title()} Correlation",
+        fontsize=label_fontsize + 6,
         fontweight="bold",
     )
 
-    # Add colored labels on the sides to show groups
-    # Color the tick labels based on group membership
-    for i, (tick_label, color) in enumerate(zip(ax.get_xticklabels(), sample_colors)):
-        tick_label.set_color(color)
-        tick_label.set_fontweight("bold")
+    # Convert colors to RGBA format for imshow (handles hex strings, named colors, etc.)
+    sample_colors_rgba = [_color_to_rgba(c) for c in sample_colors]
+    
+    # Use make_axes_locatable for properly aligned color bars
+    divider = make_axes_locatable(ax_heatmap)
+    
+    # Create left color bar - append to left side, shares y-axis with heatmap
+    ax_left_colorbar = divider.append_axes("left", size="1.5%", pad=0.05)
+    left_colors = np.array(sample_colors_rgba).reshape(-1, 1, 4)
+    ax_left_colorbar.imshow(left_colors, aspect='auto', origin='upper',
+                            extent=[0, 1, n_samples, 0])
+    ax_left_colorbar.set_xlim(0, 1)
+    ax_left_colorbar.set_ylim(n_samples, 0)  # Match heatmap orientation (0 at top)
+    ax_left_colorbar.set_xticks([])
+    ax_left_colorbar.set_yticks([])
+    ax_left_colorbar.tick_params(left=False, bottom=False)  # Remove tick marks
+    for spine in ax_left_colorbar.spines.values():
+        spine.set_visible(False)  # Remove border
+    ax_left_colorbar.set_ylabel("Group", fontsize=label_fontsize + 4, fontweight='bold')
+    
+    # Create bottom color bar - append to bottom, shares x-axis with heatmap
+    ax_bottom_colorbar = divider.append_axes("bottom", size="1.5%", pad=0.05)
+    bottom_colors = np.array(sample_colors_rgba).reshape(1, -1, 4)
+    ax_bottom_colorbar.imshow(bottom_colors, aspect='auto', origin='upper',
+                              extent=[0, n_samples, 1, 0])
+    ax_bottom_colorbar.set_xlim(0, n_samples)
+    ax_bottom_colorbar.set_ylim(1, 0)
+    ax_bottom_colorbar.set_xticks([])
+    ax_bottom_colorbar.set_yticks([])
+    ax_bottom_colorbar.tick_params(left=False, bottom=False)  # Remove tick marks
+    for spine in ax_bottom_colorbar.spines.values():
+        spine.set_visible(False)  # Remove border
+    ax_bottom_colorbar.set_xlabel("Group", fontsize=label_fontsize + 4, fontweight='bold')
 
-    for i, (tick_label, color) in enumerate(zip(ax.get_yticklabels(), sample_colors)):
-        tick_label.set_color(color)
-        tick_label.set_fontweight("bold")
+    # Add legend for groups - only include groups that actually appear in the data
+    # Filter out "na"-like values that were replaced by Sample Category fallback
+    legend_groups = [g for g in unique_groups if not _is_na_value(g)]
+    legend_handles = [Patch(facecolor=_color_to_rgba(group_color_map[g]), 
+                            edgecolor='black', label=g) 
+                      for g in legend_groups if groups.count(g) > 0]
+    
+    # Place legend close to the plot (upper right, just outside the heatmap)
+    fig.legend(handles=legend_handles, loc='upper right', bbox_to_anchor=(0.98, 0.98),
+               fontsize=label_fontsize, title="Groups", title_fontsize=label_fontsize + 2,
+               frameon=True, fancybox=True, shadow=True)
 
     plt.tight_layout()
     plt.show()
 
     # Print correlation statistics
     correlation_values = correlation_matrix.values
-    upper_triangle = correlation_values[np.triu_indices_from(correlation_values, k=1)]
+    lower_triangle = correlation_values[np.tril_indices_from(correlation_values, k=-1)]
 
     print(f"\nCorrelation summary ({method}):")
-    print(f"Mean correlation: {np.mean(upper_triangle):.3f}")
-    print(f"Min correlation: {np.min(upper_triangle):.3f}")
-    print(f"Max correlation: {np.max(upper_triangle):.3f}")
-    print(f"Correlation range: {np.max(upper_triangle) - np.min(upper_triangle):.3f}")
+    print(f"  Mean correlation: {np.nanmean(lower_triangle):.3f}")
+    print(f"  Min correlation: {np.nanmin(lower_triangle):.3f}")
+    print(f"  Max correlation: {np.nanmax(lower_triangle):.3f}")
+    print(f"  Correlation range: {np.nanmax(lower_triangle) - np.nanmin(lower_triangle):.3f}")
+    
+    if not show_annotations:
+        print(f"\n  Note: Correlation values hidden ({n_samples} samples > {max_samples_for_annotations} threshold)")
 
     # Group-wise correlation summary
-    print("\nGroup composition:")
-    for group, color in group_color_map.items():
+    print(f"\nGroup composition (by {group_column}):")
+    for group in legend_groups:  # Use filtered legend_groups instead of unique_groups
         count = groups.count(group)
         if count > 0:
             print(f"  {group}: {count} samples")
@@ -1981,3 +2107,418 @@ def plot_control_cv_distribution(
     print("Lower CV values indicate better reproducibility between control replicates")
     
     return cv_data
+
+
+# =============================================================================
+# GROUPED DATA VISUALIZATIONS
+# =============================================================================
+# These functions create heatmaps and parallel coordinate plots for any grouped data,
+# including temporal trends, dose-response, treatment groups, clusters, etc.
+
+def plot_grouped_heatmap(
+    data_df: pd.DataFrame,
+    value_columns: List[str],
+    group_column: str,
+    label_column: Optional[str] = None,
+    title: str = 'Expression Heatmap by Group',
+    cmap: str = 'RdBu_r',
+    zscore: bool = True,
+    vmin: float = -2,
+    vmax: float = 2,
+    show_labels: bool = True,
+    max_per_group: int = 50,
+    sort_by_pvalue: bool = True,
+    pvalue_column: Optional[str] = None,
+    figsize: Optional[Tuple[int, int]] = None
+) -> plt.Figure:
+    """
+    Create a heatmap of expression data organized by groups (clusters, treatments, etc).
+    
+    This is a general-purpose heatmap function that can be used for:
+    - Temporal trends (weeks as columns, clusters as groups)
+    - Dose-response (doses as columns, treatment groups as groups)
+    - Any categorical grouping of proteins
+    
+    Parameters
+    ----------
+    data_df : pd.DataFrame
+        DataFrame containing the data to visualize
+    value_columns : List[str]
+        Column names containing the values to plot (e.g., Week_0, Week_2, Week_4)
+    group_column : str
+        Column name for grouping (e.g., 'Cluster', 'Treatment', 'Category')
+    label_column : str, optional
+        Column name for row labels (e.g., 'Gene'). If None, no labels shown.
+    title : str
+        Plot title
+    cmap : str
+        Matplotlib colormap name
+    zscore : bool
+        Whether to z-score normalize each row
+    vmin, vmax : float
+        Color scale limits (only used if zscore=True, otherwise auto-scaled)
+    show_labels : bool
+        Whether to show row labels (requires label_column)
+    max_per_group : int
+        Maximum rows to show per group
+    sort_by_pvalue : bool
+        Whether to sort by p-value within groups
+    pvalue_column : str, optional
+        Column name containing p-values for sorting
+    figsize : tuple, optional
+        Figure size (width, height). Auto-calculated if None.
+        
+    Returns
+    -------
+    Figure
+        Matplotlib figure object
+        
+    Examples
+    --------
+    >>> # Temporal heatmap by cluster
+    >>> fig = plot_grouped_heatmap(
+    ...     merged_df, 
+    ...     value_columns=['Week_0', 'Week_2', 'Week_4', 'Week_8'],
+    ...     group_column='Cluster_Name',
+    ...     label_column='Gene',
+    ...     title='Temporal Protein Expression by Cluster'
+    ... )
+    
+    >>> # Dose-response heatmap by treatment
+    >>> fig = plot_grouped_heatmap(
+    ...     dose_df,
+    ...     value_columns=['Dose_0', 'Dose_10', 'Dose_50', 'Dose_100'],
+    ...     group_column='Response_Type',
+    ...     label_column='Gene'
+    ... )
+    """
+    # Get data matrix
+    X = data_df[value_columns].values.astype(float)
+    
+    # Z-score if requested
+    if zscore:
+        X_means = np.nanmean(X, axis=1, keepdims=True)
+        X_stds = np.nanstd(X, axis=1, keepdims=True)
+        X_stds[X_stds == 0] = 1
+        X_z = (X - X_means) / X_stds
+    else:
+        X_z = X
+        vmin, vmax = np.nanmin(X_z), np.nanmax(X_z)
+    
+    # Sort by group, then optionally by p-value
+    sorted_df = data_df.copy()
+    sorted_df['_z_data'] = list(X_z)
+    
+    sort_cols = [group_column]
+    ascending = [True]
+    if sort_by_pvalue and pvalue_column and pvalue_column in sorted_df.columns:
+        sort_cols.append(pvalue_column)
+        ascending.append(True)
+    
+    sorted_df = sorted_df.sort_values(sort_cols, ascending=ascending)
+    
+    # Limit rows per group
+    limited_dfs = []
+    for group in sorted_df[group_column].unique():
+        group_subset = sorted_df[sorted_df[group_column] == group].head(max_per_group)
+        limited_dfs.append(group_subset)
+    sorted_df = pd.concat(limited_dfs)
+    
+    # Create heatmap data
+    heatmap_data = np.vstack(sorted_df['_z_data'].values)
+    
+    # Clean column labels
+    col_labels = [str(c).replace('Week_', 'W').replace('Dose_', 'D') for c in value_columns]
+    
+    # Row labels
+    row_labels = sorted_df[label_column].tolist() if label_column and show_labels else None
+    
+    # Calculate figure size
+    if figsize is None:
+        fig_height = min(12, max(6, len(sorted_df) * 0.12))
+        figsize = (12, fig_height)
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    plt.subplots_adjust(right=0.75, left=0.15)
+    
+    # Plot heatmap
+    im = ax.imshow(heatmap_data, aspect='auto', cmap=cmap, vmin=vmin, vmax=vmax)
+    
+    # X-axis labels
+    ax.set_xticks(range(len(col_labels)))
+    ax.set_xticklabels(col_labels, fontsize=11, fontweight='bold')
+    ax.set_xlabel('Condition', fontsize=12, fontweight='bold')
+    
+    # Y-axis labels
+    if row_labels and len(sorted_df) <= 50:
+        ax.set_yticks(range(len(row_labels)))
+        ax.set_yticklabels(row_labels, fontsize=8)
+    else:
+        ax.set_ylabel(f'Proteins (n={len(sorted_df)})', fontsize=12)
+        ax.set_yticks([])
+    
+    # Add group separators and labels
+    cluster_bounds = []
+    current_idx = 0
+    for group in sorted_df[group_column].unique():
+        n_in_group = (sorted_df[group_column] == group).sum()
+        cluster_bounds.append((current_idx, group, n_in_group))
+        if current_idx > 0:
+            ax.axhline(y=current_idx - 0.5, color='white', linewidth=2)
+        current_idx += n_in_group
+    
+    # Group labels on right side
+    ax2 = ax.twinx()
+    ax2.set_ylim(ax.get_ylim())
+    group_mids = [start + n/2 for start, _, n in cluster_bounds]
+    group_labels_text = [f"{name}\n(n={n})" for _, name, n in cluster_bounds]
+    ax2.set_yticks(group_mids)
+    ax2.set_yticklabels(group_labels_text, fontsize=10, fontweight='bold')
+    
+    # Colorbar
+    cbar_ax = fig.add_axes([0.92, 0.25, 0.02, 0.5])
+    cbar = fig.colorbar(im, cax=cbar_ax)
+    cbar.set_label('Z-score' if zscore else 'Value', fontsize=11, labelpad=10)
+    cbar.ax.tick_params(labelsize=9)
+    
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=10)
+    
+    return fig
+
+
+def plot_grouped_trajectories(
+    data_df: pd.DataFrame,
+    value_columns: List[str],
+    group_column: str,
+    title: str = 'Expression Trajectories by Group',
+    x_values: Optional[List[float]] = None,
+    x_label: str = 'Condition',
+    y_label: str = 'Z-scored Value',
+    zscore: bool = True,
+    alpha: float = 0.3,
+    linewidth: float = 1.5,
+    line_color: str = '#1f4e79',
+    mean_color: str = 'black',
+    show_mean: bool = True,
+    n_cols: int = 2,
+    figsize: Optional[Tuple[int, int]] = None
+) -> plt.Figure:
+    """
+    Create parallel coordinate / trajectory plots for each group.
+    
+    This function creates a grid of line plots showing individual trajectories
+    and mean trajectory for each group. Useful for:
+    - Temporal trends across time points
+    - Dose-response curves
+    - Any continuous variable across conditions
+    
+    Parameters
+    ----------
+    data_df : pd.DataFrame
+        DataFrame containing the data to visualize
+    value_columns : List[str]
+        Column names containing the values (e.g., Week_0, Week_2, etc.)
+    group_column : str
+        Column name for grouping
+    title : str
+        Overall plot title
+    x_values : List[float], optional
+        Numeric x-axis values. If None, extracted from column names or uses indices.
+    x_label : str
+        X-axis label
+    y_label : str
+        Y-axis label
+    zscore : bool
+        Whether to z-score normalize each row
+    alpha : float
+        Transparency for individual lines
+    linewidth : float
+        Line width for individual lines
+    line_color : str
+        Color for individual trajectory lines
+    mean_color : str
+        Color for mean trajectory line
+    show_mean : bool
+        Whether to show mean trajectory with highlighted line
+    n_cols : int
+        Number of columns in subplot grid
+    figsize : tuple, optional
+        Figure size. Auto-calculated if None.
+        
+    Returns
+    -------
+    Figure
+        Matplotlib figure object
+        
+    Examples
+    --------
+    >>> # Temporal trajectories by cluster
+    >>> fig = plot_grouped_trajectories(
+    ...     merged_df,
+    ...     value_columns=['Week_0', 'Week_2', 'Week_4', 'Week_8'],
+    ...     group_column='Cluster_Name',
+    ...     x_values=[0, 2, 4, 8],
+    ...     x_label='Week',
+    ...     title='Temporal Patterns by Cluster'
+    ... )
+    
+    >>> # Dose-response by sensitivity group
+    >>> fig = plot_grouped_trajectories(
+    ...     dose_df,
+    ...     value_columns=['Dose_0', 'Dose_10', 'Dose_50', 'Dose_100'],
+    ...     group_column='Sensitivity',
+    ...     x_values=[0, 10, 50, 100],
+    ...     x_label='Dose (mg)',
+    ...     title='Dose Response by Sensitivity'
+    ... )
+    """
+    # Get data and optionally z-score
+    X = data_df[value_columns].values.astype(float)
+    
+    if zscore:
+        X_means = np.nanmean(X, axis=1, keepdims=True)
+        X_stds = np.nanstd(X, axis=1, keepdims=True)
+        X_stds[X_stds == 0] = 1
+        X_z = (X - X_means) / X_stds
+        X_z = np.nan_to_num(X_z, nan=0, posinf=0, neginf=0)
+    else:
+        X_z = X
+    
+    # Extract x-values from column names if not provided
+    if x_values is None:
+        # Try to extract numbers from column names
+        x_values = []
+        for col in value_columns:
+            # Try common patterns: Week_0, Week0, W0, Dose_10, D10, etc.
+            import re
+            match = re.search(r'[-+]?\d*\.?\d+', str(col))
+            if match:
+                x_values.append(float(match.group()))
+            else:
+                x_values.append(len(x_values))  # Fallback to index
+    
+    # Get unique groups
+    groups = data_df[group_column].unique()
+    n_groups = len(groups)
+    
+    n_rows = (n_groups + n_cols - 1) // n_cols
+    
+    if figsize is None:
+        figsize = (7 * n_cols, max(4 * n_rows, 8))
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    if n_groups == 1:
+        axes = np.array([axes])
+    axes = axes.flatten()
+    
+    for idx, group_name in enumerate(groups):
+        ax = axes[idx]
+        
+        mask = data_df[group_column] == group_name
+        n_items = mask.sum()
+        
+        if n_items > 0:
+            # Plot individual trajectories
+            for i, is_in_group in enumerate(mask):
+                if is_in_group:
+                    ax.plot(x_values, X_z[i], color=line_color, alpha=alpha, linewidth=linewidth)
+            
+            # Plot mean trajectory
+            if show_mean:
+                group_mean = X_z[mask].mean(axis=0)
+                ax.plot(x_values, group_mean, color=mean_color, linewidth=4, label=f'Mean (n={n_items})')
+                ax.plot(x_values, group_mean, color='orange', linewidth=2.5, linestyle='--')
+        
+        ax.axhline(y=0, color='gray', linestyle=':', alpha=0.5)
+        ax.set_xlabel(x_label, fontsize=12)
+        ax.set_ylabel(y_label, fontsize=12)
+        ax.set_title(f'{group_name}\n(n={n_items})', fontsize=12, fontweight='bold')
+        ax.set_xticks(x_values)
+        if zscore:
+            ax.set_ylim(-2.5, 2.5)
+        if show_mean:
+            ax.legend(loc='upper right', fontsize=10)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=10)
+    
+    # Hide unused subplots
+    for idx in range(n_groups, len(axes)):
+        axes[idx].set_visible(False)
+    
+    plt.suptitle(title, fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    
+    return fig
+
+
+def plot_protein_profile(
+    data_df: pd.DataFrame,
+    protein_id: str,
+    value_columns: List[str],
+    protein_column: str = 'Protein',
+    gene_column: Optional[str] = 'Gene',
+    x_values: Optional[List[float]] = None,
+    x_label: str = 'Condition',
+    y_label: str = 'Abundance',
+    title: Optional[str] = None,
+    color: str = '#1f4e79',
+    figsize: Tuple[int, int] = (10, 6)
+) -> plt.Figure:
+    """
+    Plot the expression profile of a single protein across conditions.
+    
+    Parameters
+    ----------
+    data_df : pd.DataFrame
+        DataFrame containing protein data
+    protein_id : str
+        Protein identifier to plot
+    value_columns : List[str]
+        Column names containing values across conditions
+    protein_column : str
+        Column name containing protein identifiers
+    gene_column : str, optional
+        Column name containing gene names for title
+    x_values : List[float], optional
+        X-axis values. If None, uses indices.
+    x_label, y_label : str
+        Axis labels
+    title : str, optional
+        Plot title. If None, auto-generated from protein/gene name.
+    color : str
+        Line and marker color
+    figsize : tuple
+        Figure size
+        
+    Returns
+    -------
+    Figure
+        Matplotlib figure object
+    """
+    # Find the protein
+    mask = data_df[protein_column] == protein_id
+    if not mask.any():
+        raise ValueError(f"Protein '{protein_id}' not found in data")
+    
+    protein_row = data_df[mask].iloc[0]
+    values = protein_row[value_columns].values.astype(float)
+    
+    if x_values is None:
+        x_values = list(range(len(value_columns)))
+    
+    # Generate title
+    if title is None:
+        gene = protein_row.get(gene_column, protein_id) if gene_column else protein_id
+        title = f'{gene} ({protein_id})'
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    ax.plot(x_values, values, 'o-', color=color, linewidth=2, markersize=10)
+    ax.set_xlabel(x_label, fontsize=12)
+    ax.set_ylabel(y_label, fontsize=12)
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_xticks(x_values)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    return fig

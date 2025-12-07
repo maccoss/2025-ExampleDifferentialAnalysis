@@ -31,7 +31,7 @@ class TestStatisticalConfig:
         config = StatisticalConfig()
 
         assert config.statistical_test_method == "mixed_effects"
-        assert config.analysis_type == "paired"
+        assert config.analysis_type is None  # Must be explicitly set by user
         assert config.p_value_threshold == 0.05
         assert config.fold_change_threshold == 1.5
         assert config.use_adjusted_pvalue == "adjusted"
@@ -825,3 +825,236 @@ class TestLogTransformation:
             assert False, "Should have raised ValueError for invalid log base"
         except ValueError as e:
             assert "Unknown log base" in str(e)
+
+
+class TestLongitudinalAnalysisType:
+    """Test the longitudinal analysis type (F-test for any change over time)"""
+
+    @pytest.fixture
+    def longitudinal_metadata(self):
+        """Create metadata for longitudinal analysis"""
+        return {
+            # Subject 1 across 4 timepoints
+            'S1_W0': {'Subject': 'S1', 'Week': 0},
+            'S1_W2': {'Subject': 'S1', 'Week': 2},
+            'S1_W4': {'Subject': 'S1', 'Week': 4},
+            'S1_W8': {'Subject': 'S1', 'Week': 8},
+            # Subject 2 across 4 timepoints
+            'S2_W0': {'Subject': 'S2', 'Week': 0},
+            'S2_W2': {'Subject': 'S2', 'Week': 2},
+            'S2_W4': {'Subject': 'S2', 'Week': 4},
+            'S2_W8': {'Subject': 'S2', 'Week': 8},
+            # Subject 3 across 4 timepoints
+            'S3_W0': {'Subject': 'S3', 'Week': 0},
+            'S3_W2': {'Subject': 'S3', 'Week': 2},
+            'S3_W4': {'Subject': 'S3', 'Week': 4},
+            'S3_W8': {'Subject': 'S3', 'Week': 8},
+        }
+
+    @pytest.fixture
+    def longitudinal_protein_data(self):
+        """Create protein data for longitudinal analysis"""
+        np.random.seed(42)
+        n_proteins = 5
+        
+        data = pd.DataFrame({
+            'Protein': [f'P{i:05d}' for i in range(n_proteins)],
+            'Gene': [f'GENE{i}' for i in range(n_proteins)],
+        })
+        
+        # Create sample columns with realistic temporal patterns
+        samples = [f'S{s}_W{w}' for s in [1, 2, 3] for w in [0, 2, 4, 8]]
+        for sample in samples:
+            data[sample] = np.random.lognormal(10, 0.5, n_proteins)
+        
+        return data
+
+    def test_longitudinal_config_validation(self):
+        """Test that longitudinal analysis configuration validates correctly"""
+        config = StatisticalConfig()
+        config.analysis_type = "longitudinal"
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.time_column = "Week"
+        config.covariates = []
+        
+        # Should validate successfully
+        config.validate()
+        
+        assert config.analysis_type == "longitudinal"
+        assert config.time_column == "Week"
+
+    def test_longitudinal_config_requires_time_column(self):
+        """Test that longitudinal analysis requires time_column"""
+        config = StatisticalConfig()
+        config.analysis_type = "longitudinal"
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.time_column = None  # Missing time column
+        
+        with pytest.raises(ValueError, match="time_column"):
+            config.validate()
+
+    def test_longitudinal_analysis_runs(self, longitudinal_protein_data, longitudinal_metadata):
+        """Test that longitudinal analysis runs successfully"""
+        config = StatisticalConfig()
+        config.analysis_type = "longitudinal"
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.time_column = "Week"
+        config.covariates = []
+        config.p_value_threshold = 0.05
+        
+        try:
+            result = run_comprehensive_statistical_analysis(
+                normalized_data=longitudinal_protein_data,
+                sample_metadata=longitudinal_metadata,
+                config=config
+            )
+            
+            assert isinstance(result, pd.DataFrame)
+            assert 'P.Value' in result.columns
+            assert 'logFC' in result.columns
+            assert len(result) == 5  # 5 proteins
+            print("✓ Longitudinal analysis ran successfully")
+            
+        except ImportError as e:
+            if "statsmodels" in str(e):
+                pytest.skip("statsmodels not available")
+            raise
+
+
+class TestLinearTrendAnalysisType:
+    """Test the linear_trend analysis type (test if slope != 0)"""
+
+    @pytest.fixture
+    def trend_metadata(self):
+        """Create metadata for linear trend analysis"""
+        return {
+            # Subject 1 across doses
+            'S1_D0': {'Subject': 'S1', 'Dose': 0},
+            'S1_D20': {'Subject': 'S1', 'Dose': 20},
+            'S1_D40': {'Subject': 'S1', 'Dose': 40},
+            # Subject 2 across doses
+            'S2_D0': {'Subject': 'S2', 'Dose': 0},
+            'S2_D20': {'Subject': 'S2', 'Dose': 20},
+            'S2_D40': {'Subject': 'S2', 'Dose': 40},
+            # Subject 3 across doses
+            'S3_D0': {'Subject': 'S3', 'Dose': 0},
+            'S3_D20': {'Subject': 'S3', 'Dose': 20},
+            'S3_D40': {'Subject': 'S3', 'Dose': 40},
+        }
+
+    @pytest.fixture
+    def trend_protein_data(self):
+        """Create protein data with dose-dependent trends"""
+        np.random.seed(42)
+        n_proteins = 5
+        
+        data = pd.DataFrame({
+            'Protein': [f'P{i:05d}' for i in range(n_proteins)],
+            'Gene': [f'GENE{i}' for i in range(n_proteins)],
+        })
+        
+        # Create sample columns
+        samples = [f'S{s}_D{d}' for s in [1, 2, 3] for d in [0, 20, 40]]
+        for sample in samples:
+            data[sample] = np.random.lognormal(10, 0.5, n_proteins)
+        
+        return data
+
+    def test_linear_trend_config_validation(self):
+        """Test that linear_trend analysis configuration validates correctly"""
+        config = StatisticalConfig()
+        config.analysis_type = "linear_trend"
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.time_column = "Dose"
+        
+        # Should validate successfully
+        config.validate()
+        
+        assert config.analysis_type == "linear_trend"
+
+    def test_linear_trend_config_requires_time_column(self):
+        """Test that linear_trend analysis requires time_column"""
+        config = StatisticalConfig()
+        config.analysis_type = "linear_trend"
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.time_column = None
+        
+        with pytest.raises(ValueError, match="time_column"):
+            config.validate()
+
+    def test_linear_trend_analysis_runs(self, trend_protein_data, trend_metadata):
+        """Test that linear_trend analysis runs successfully"""
+        config = StatisticalConfig()
+        config.analysis_type = "linear_trend"
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.time_column = "Dose"
+        config.p_value_threshold = 0.05
+        
+        try:
+            result = run_comprehensive_statistical_analysis(
+                normalized_data=trend_protein_data,
+                sample_metadata=trend_metadata,
+                config=config
+            )
+            
+            assert isinstance(result, pd.DataFrame)
+            assert 'P.Value' in result.columns
+            assert 'logFC' in result.columns
+            assert len(result) == 5  # 5 proteins
+            print("✓ Linear trend analysis ran successfully")
+            
+        except ImportError as e:
+            if "statsmodels" in str(e):
+                pytest.skip("statsmodels not available")
+            raise
+
+    def test_dose_response_alias(self):
+        """Test that dose_response is accepted as alias for linear_trend"""
+        config = StatisticalConfig()
+        config.analysis_type = "dose_response"  # Alias
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.time_column = "Dose"
+        
+        # Should validate successfully (dose_response is accepted as alias)
+        config.validate()
+
+
+class TestCovariateHandling:
+    """Test handling of covariates in mixed-effects models"""
+
+    def test_empty_covariates_config(self):
+        """Test that empty covariates list is handled correctly"""
+        config = StatisticalConfig()
+        config.analysis_type = "longitudinal"
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.time_column = "Week"
+        config.covariates = []  # Empty - recommended for longitudinal
+        
+        # Should validate successfully
+        config.validate()
+        assert config.covariates == []
+
+    def test_covariates_with_special_characters(self):
+        """Test that covariates with special characters are handled"""
+        config = StatisticalConfig()
+        config.analysis_type = "paired"
+        config.statistical_test_method = "mixed_effects"
+        config.subject_column = "Subject"
+        config.group_column = "Group"
+        config.group_labels = ["Control", "Treatment"]
+        config.paired_column = "Visit"
+        config.paired_label1 = "Baseline"
+        config.paired_label2 = "Week4"
+        config.covariates = ["Age (years)", "Body Mass Index"]  # Special characters
+        
+        # Should validate successfully
+        config.validate()
+

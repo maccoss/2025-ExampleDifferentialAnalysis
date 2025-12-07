@@ -52,6 +52,11 @@ visualization
     Purpose: Quality control plots, results visualization, and publication-ready figures  
     Key functions: plot_volcano(), plot_box_plot(), plot_pca()
     Use when: Need QC plots, want to visualize results, create figures
+
+temporal_clustering
+    Purpose: K-means clustering of temporal protein trends and gene set enrichment
+    Key functions: TemporalAnalyzer, TemporalClusteringConfig
+    Use when: Analyzing longitudinal proteomics data with multiple time points
     
 validation
     Purpose: Data validation, error checking, and diagnostic reporting
@@ -91,6 +96,8 @@ from . import preprocessing       # Data cleaning and quality assessment
 from . import normalization       # Normalization methods
 from . import statistical_analysis # Statistical testing and modeling
 from . import visualization       # Plotting and visualization
+from . import temporal_clustering # Temporal trend analysis and clustering
+from . import enrichment         # Gene set enrichment analysis
 from . import validation         # Data validation and error checking
 from . import export             # Results export and configuration management
 
@@ -166,6 +173,42 @@ from .visualization import (
     plot_individual_control_pool_analysis    # Detailed: Individual control pool analysis
 )
 
+# TEMPORAL CLUSTERING - Longitudinal trend analysis and gene set enrichment
+from .temporal_clustering import (
+    TemporalClusteringConfig,           # Configuration for temporal analysis
+    run_temporal_analysis,               # Main function: Complete temporal analysis pipeline
+    calculate_temporal_means,            # Calculate mean abundance at each timepoint
+    cluster_temporal_trends,             # Cluster proteins by temporal patterns
+    name_clusters_by_pattern,            # Assign descriptive names to clusters
+    classify_trend_pattern,              # Classify individual protein trends
+    merge_with_statistics,               # Merge temporal data with statistical results
+    filter_significant_proteins,         # Filter to statistically significant proteins
+    run_enrichment_by_cluster,           # Run enrichment analysis per cluster (temporal-specific)
+    plot_cluster_heatmap,                # Heatmap visualization of clusters (temporal-specific)
+    plot_cluster_parallel_coordinates,   # Parallel coordinate plots for clusters (temporal-specific)
+)
+
+# GENE SET ENRICHMENT - General-purpose enrichment analysis via Enrichr API
+from .enrichment import (
+    EnrichmentConfig,                    # Configuration for enrichment analysis
+    query_enrichr,                       # Query Enrichr API directly
+    parse_enrichr_results,               # Parse raw Enrichr results to DataFrame
+    run_enrichment_analysis,             # Run enrichment on a gene list
+    run_enrichment_by_group,             # Run enrichment for groups (clusters, categories, etc.)
+    run_differential_enrichment,         # Run enrichment on up/down-regulated genes
+    plot_enrichment_barplot,             # Bar plot of enrichment results
+    plot_enrichment_comparison,          # Compare enrichment across groups
+    get_available_libraries,             # List available Enrichr libraries
+    merge_enrichment_results,            # Merge multiple enrichment DataFrames
+)
+
+# GROUPED VISUALIZATIONS - General-purpose heatmaps and trajectory plots
+from .visualization import (
+    plot_grouped_heatmap,               # Heatmap for any grouped data
+    plot_grouped_trajectories,          # Line plots for grouped trajectories
+    plot_protein_profile,               # Single protein profile plot
+)
+
 # =============================================================================
 # PUBLIC API - All functions available for import
 # =============================================================================
@@ -177,6 +220,8 @@ __all__ = [
     "normalization",            # All normalization methods
     "statistical_analysis",     # Complete statistical analysis suite
     "visualization",            # All plotting and visualization functions
+    "temporal_clustering",      # Temporal trend analysis and clustering
+    "enrichment",              # Gene set enrichment analysis
     "validation",              # Data validation and error handling
     "export",                  # Results export and configuration management
     
@@ -230,4 +275,32 @@ __all__ = [
     "plot_control_correlation_analysis",   # Control sample QC
     "plot_control_group_correlation_analysis", # Group-wise control QC
     "plot_individual_control_pool_analysis",   # Detailed control analysis
+    "plot_grouped_heatmap",               # Heatmap for any grouped data
+    "plot_grouped_trajectories",          # Trajectory plots for groups
+    "plot_protein_profile",               # Single protein profile
+    
+    # TEMPORAL CLUSTERING - Longitudinal trend analysis
+    "TemporalClusteringConfig",          # Configuration for temporal analysis
+    "run_temporal_analysis",             # MAIN FUNCTION: Complete temporal analysis pipeline
+    "calculate_temporal_means",          # Calculate mean abundance at each timepoint
+    "cluster_temporal_trends",           # Cluster proteins by temporal patterns
+    "name_clusters_by_pattern",          # Assign descriptive names to clusters
+    "classify_trend_pattern",            # Classify individual protein trends
+    "merge_with_statistics",             # Merge temporal data with statistical results
+    "filter_significant_proteins",       # Filter to significant proteins only
+    "run_enrichment_by_cluster",         # Run enrichment analysis per cluster
+    "plot_cluster_heatmap",              # Heatmap visualization of clusters (temporal-specific)
+    "plot_cluster_parallel_coordinates", # Parallel coordinate plots for clusters (temporal-specific)
+    
+    # GENE SET ENRICHMENT - General-purpose enrichment analysis
+    "EnrichmentConfig",                  # Configuration for enrichment analysis
+    "query_enrichr",                     # Query Enrichr API directly
+    "parse_enrichr_results",             # Parse raw Enrichr results
+    "run_enrichment_analysis",           # Run enrichment on a gene list
+    "run_enrichment_by_group",           # Run enrichment by group (clusters, categories)
+    "run_differential_enrichment",       # Enrichment on up/down-regulated genes
+    "plot_enrichment_barplot",           # Bar plot of enrichment results
+    "plot_enrichment_comparison",        # Compare enrichment across groups
+    "get_available_libraries",           # List available Enrichr libraries
+    "merge_enrichment_results",          # Merge multiple enrichment DataFrames
 ]
