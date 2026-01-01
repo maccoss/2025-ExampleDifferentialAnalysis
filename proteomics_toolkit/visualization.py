@@ -332,7 +332,7 @@ def plot_volcano(
                 subset["neg_log10_p"],
                 c=color,
                 alpha=0.6,
-                s=30,
+                s=60,
                 label=label,
             )
 
@@ -344,7 +344,16 @@ def plot_volcano(
     ax.axvline(x=-effective_threshold, color="black", linestyle="--", alpha=0.5)
 
     # Label top significant proteins
-    if label_top_n > 0 and gene_column in df.columns:
+    # Determine the actual gene column to use (fallback logic)
+    actual_gene_column = None
+    if gene_column in df.columns:
+        actual_gene_column = gene_column
+    elif "Gene" in df.columns:
+        actual_gene_column = "Gene"
+    elif "Gene_Names" in df.columns:
+        actual_gene_column = "Gene_Names"
+    
+    if label_top_n > 0 and actual_gene_column is not None:
         significant = (
             df[
                 (df[p_col_used] < p_threshold)
@@ -356,12 +365,13 @@ def plot_volcano(
 
         for _, row in significant.iterrows():
             ax.annotate(
-                row[gene_column],
+                row[actual_gene_column],
                 (row["logFC"], row["neg_log10_p"]),
                 xytext=(5, 5),
                 textcoords="offset points",
-                fontsize=8,
-                alpha=0.7,
+                fontsize=11,
+                fontweight='bold',
+                alpha=0.9,
             )
 
     # Customize plot
@@ -409,7 +419,7 @@ def plot_volcano(
     ax.set_xlim(logfc_min - padding, logfc_max + padding)
 
     # Position legend in upper right corner to avoid blocking data
-    ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True, fontsize=11)
+    ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True, fontsize=14)
 
     plt.tight_layout()
     plt.show()

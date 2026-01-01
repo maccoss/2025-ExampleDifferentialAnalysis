@@ -1541,6 +1541,10 @@ def run_temporal_analysis(
     print(f"✓ {treatment_name} temporal analysis complete", flush=True)
     print("="*80, flush=True)
     
+    # Close all figures to prevent them from leaking into subsequent notebook cells
+    # The figures are stored in results dict and can still be displayed with display()
+    plt.close('all')
+    
     # Re-enable interactive plotting
     plt.ion()
     
