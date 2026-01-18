@@ -201,13 +201,18 @@ def plot_volcano(
     differential_df: pd.DataFrame,
     fc_threshold: float = 0.5,
     p_threshold: float = 0.05,
-    figsize: Tuple[int, int] = (12, 8),
+    figsize: Tuple[int, int] = (14, 10),
     title: Optional[str] = None,
-    gene_column: str = "Gene_Names_Display",
+    gene_column: str = "Gene",
     label_top_n: int = 10,
     use_adjusted_pvalue: str = "adjusted",
     enable_pvalue_fallback: bool = True,
     normalization_method: Optional[str] = None,
+    point_size: int = 80,
+    alpha: float = 0.4,
+    label_fontsize: int = 11,
+    axis_label_fontsize: int = 20,
+    tick_label_fontsize: int = 16,
 ) -> None:
     """
     Create volcano plot for differential analysis results.
@@ -236,6 +241,16 @@ def plot_volcano(
     normalization_method : str, optional
         Normalization method used ("VSN", "Median", etc.) to determine appropriate
         X-axis label. If None, defaults to "Log2 Fold Change"
+    point_size : int
+        Size of scatter plot points (default: 80)
+    alpha : float
+        Transparency of scatter points, 0-1 (default: 0.4, more transparent)
+    label_fontsize : int
+        Font size for gene labels on significant proteins (default: 11)
+    axis_label_fontsize : int
+        Font size for x and y axis labels (default: 20)
+    tick_label_fontsize : int
+        Font size for tick labels (default: 16)
     """
 
     if len(differential_df) == 0:
@@ -245,6 +260,18 @@ def plot_volcano(
     # Make a copy to avoid modifying original data
     df = differential_df.copy()
 
+    # Auto-detect gene column if specified column doesn't exist
+    gene_col_used = gene_column
+    if gene_column not in df.columns:
+        # Try common gene column names
+        gene_column_options = ["Gene", "Gene_Names_Display", "gene", "GeneName", "gene_name", "Symbol"]
+        for col in gene_column_options:
+            if col in df.columns:
+                gene_col_used = col
+                break
+        else:
+            gene_col_used = None  # No gene column found
+    
     # Determine which p-value column to use
     p_col_used = None
     fallback_used = False
@@ -331,9 +358,11 @@ def plot_volcano(
                 subset["logFC"],
                 subset["neg_log10_p"],
                 c=color,
-                alpha=0.6,
-                s=60,
+                alpha=alpha,
+                s=point_size,
                 label=label,
+                edgecolors='white',
+                linewidth=0.5,
             )
 
     # Add significance thresholds
@@ -344,16 +373,7 @@ def plot_volcano(
     ax.axvline(x=-effective_threshold, color="black", linestyle="--", alpha=0.5)
 
     # Label top significant proteins
-    # Determine the actual gene column to use (fallback logic)
-    actual_gene_column = None
-    if gene_column in df.columns:
-        actual_gene_column = gene_column
-    elif "Gene" in df.columns:
-        actual_gene_column = "Gene"
-    elif "Gene_Names" in df.columns:
-        actual_gene_column = "Gene_Names"
-    
-    if label_top_n > 0 and actual_gene_column is not None:
+    if label_top_n > 0 and gene_col_used is not None and gene_col_used in df.columns:
         significant = (
             df[
                 (df[p_col_used] < p_threshold)
@@ -364,14 +384,19 @@ def plot_volcano(
         )
 
         for _, row in significant.iterrows():
+            # Offset labels based on position to reduce overlap
+            x_offset = 8 if row["logFC"] > 0 else -8
+            ha = 'left' if row["logFC"] > 0 else 'right'
             ax.annotate(
-                row[actual_gene_column],
+                row[gene_col_used],
                 (row["logFC"], row["neg_log10_p"]),
-                xytext=(5, 5),
+                xytext=(x_offset, 5),
                 textcoords="offset points",
-                fontsize=11,
+                fontsize=label_fontsize,
                 fontweight='bold',
                 alpha=0.9,
+                ha=ha,
+                arrowprops=dict(arrowstyle='-', color='gray', alpha=0.3, lw=0.5),
             )
 
     # Customize plot
@@ -397,8 +422,8 @@ def plot_volcano(
     print(f"\n{plot_title}")
 
     # Customize plot appearance
-    ax.set_xlabel(x_label, fontsize=16, fontweight="bold")
-    ax.set_ylabel(f"-Log10 {p_type_label}", fontsize=16, fontweight="bold")
+    ax.set_xlabel(x_label, fontsize=axis_label_fontsize, fontweight="bold")
+    ax.set_ylabel(f"-Log10 {p_type_label}", fontsize=axis_label_fontsize, fontweight="bold")
 
     # Remove top and right spines, make bottom and left thicker
     ax.spines["top"].set_visible(False)
@@ -407,7 +432,7 @@ def plot_volcano(
     ax.spines["bottom"].set_linewidth(2)
 
     # Increase tick label size
-    ax.tick_params(axis="both", which="major", labelsize=12, width=1.5, length=6)
+    ax.tick_params(axis="both", which="major", labelsize=tick_label_fontsize, width=2, length=8)
 
     ax.grid(True, alpha=0.3)
 
@@ -419,7 +444,7 @@ def plot_volcano(
     ax.set_xlim(logfc_min - padding, logfc_max + padding)
 
     # Position legend in upper right corner to avoid blocking data
-    ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True, fontsize=14)
+    ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True, fontsize=11)
 
     plt.tight_layout()
     plt.show()

@@ -1463,43 +1463,76 @@ def run_temporal_analysis(
     )
     results['merged_df'] = merged_df
     
-    # 4. Filter significant proteins
+    # 4. Filter significant proteins (with fallback to unadjusted p-values)
     print(f"\n4. Filtering significant proteins (p < {config.p_value_threshold})...", flush=True)
+    
+    # Determine p-value label for titles
+    pval_label = "FDR" if config.use_adjusted_pvalue else "p"
+    fallback_used = False
+    
     sig_df = filter_significant_proteins(merged_df, config)
+    
+    # Fallback to unadjusted p-values if no FDR-significant proteins found
+    if len(sig_df) == 0 and config.use_adjusted_pvalue and 'P.Value' in merged_df.columns:
+        # Check if there are proteins significant with unadjusted p-values
+        unadj_count = (merged_df['P.Value'] < config.p_value_threshold).sum()
+        if unadj_count > 0:
+            print(f"   ⚠️  No proteins found with FDR < {config.p_value_threshold}")
+            print(f"   📊 Automatically falling back to unadjusted p-values ({unadj_count} proteins)")
+            print("      Note: Results use raw p-values, interpret with caution")
+            # Create a temporary config with unadjusted p-values
+            fallback_config = TemporalClusteringConfig(
+                p_value_threshold=config.p_value_threshold,
+                use_adjusted_pvalue=False,
+                min_fold_change=config.min_fold_change
+            )
+            sig_df = filter_significant_proteins(merged_df, fallback_config)
+            pval_label = "p (unadjusted)"
+            fallback_used = True
+    
     print(f"   Significant proteins: {len(sig_df)}", flush=True)
     results['significant_df'] = sig_df
+    results['fallback_used'] = fallback_used
     
     # 5. Create visualizations
     print("\n5. Creating visualizations...", flush=True)
     
-    # Heatmap
-    print("   - Cluster heatmap", flush=True)
-    fig_heatmap = plot_cluster_heatmap(
-        sig_df, week_columns, 
-        title=f'{treatment_name}: Significant Proteins by Cluster (p<{config.p_value_threshold})',
-        config=config
-    )
-    results['fig_heatmap'] = fig_heatmap
+    # Check if there are any significant proteins
+    if len(sig_df) == 0:
+        print(f"   ⚠️  No significant proteins found ({pval_label} < {config.p_value_threshold})")
+        print("   Skipping heatmap and parallel coordinate plots")
+        print("   Consider using unadjusted p-values (set use_adjusted_pvalue=False in config)")
+        results['fig_heatmap'] = None
+        results['fig_parallel'] = None
+    else:
+        # Heatmap
+        print("   - Cluster heatmap", flush=True)
+        fig_heatmap = plot_cluster_heatmap(
+            sig_df, week_columns, 
+            title=f'{treatment_name}: Significant Proteins by Cluster ({pval_label}<{config.p_value_threshold})',
+            config=config
+        )
+        results['fig_heatmap'] = fig_heatmap
+        
+        # Parallel coordinate plots
+        print("   - Parallel coordinate plots", flush=True)
+        fig_parallel = plot_cluster_parallel_coordinates(
+            sig_df, week_columns,
+            title=f'{treatment_name}: Temporal Patterns ({pval_label}<{config.p_value_threshold})',
+            config=config
+        )
+        results['fig_parallel'] = fig_parallel
     
-    # Parallel coordinate plots
-    print("   - Parallel coordinate plots", flush=True)
-    fig_parallel = plot_cluster_parallel_coordinates(
-        sig_df, week_columns,
-        title=f'{treatment_name}: Temporal Patterns (Significant Only)',
-        config=config
-    )
-    results['fig_parallel'] = fig_parallel
-    
-    # Silhouette analysis plot
+    # Silhouette analysis plot - shows ALL proteins used for clustering
     print("   - Silhouette analysis plot", flush=True)
     fig_silhouette = plot_silhouette_analysis(
         X_scaled, cluster_labels, cluster_names,
-        title=f'{treatment_name}: Cluster Quality Analysis'
+        title=f'{treatment_name}: Cluster Quality Analysis (all {len(cluster_labels)} proteins)'
     )
     results['fig_silhouette'] = fig_silhouette
     
     # 6. Enrichment analysis
-    if run_enrichment:
+    if run_enrichment and len(sig_df) > 0:
         print("\n6. Running enrichment analysis...", flush=True)
         enrichment_results = run_enrichment_by_cluster(sig_df, config=config)
         results['enrichment_results'] = enrichment_results
@@ -1520,6 +1553,8 @@ def run_temporal_analysis(
                 f'{treatment_name}: Pathway Enrichment Comparison'
             )
             results['fig_enrichment_comparison'] = fig_comparison
+    elif run_enrichment:
+        print("\n6. Skipping enrichment analysis (no significant proteins)", flush=True)
     
     # 7. Export results
     if output_prefix:
